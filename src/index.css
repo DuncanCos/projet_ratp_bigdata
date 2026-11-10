@@ -1,0 +1,149 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* Palette : carrelage blanc biseauté du métro, encre bleu-gris, les couleurs
+   officielles des lignes sont les seules teintes saturées. */
+@theme {
+  --font-sans: "Archivo Variable", system-ui, sans-serif;
+  --color-tile: #eef1ef;
+  --color-tile-deep: #dfe4e1;
+  --color-ink: #1d2733;
+  --color-ink-soft: #5b6672;
+  --color-rail: #b9c1bd;
+  --color-signal: #e4002b;
+}
+
+html, body, #root { height: 100%; }
+body {
+  margin: 0;
+  background: var(--color-tile);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-feature-settings: "tnum";
+  -webkit-font-smoothing: antialiased;
+}
+
+.condensed { font-stretch: 78%; }
+
+:focus-visible { outline: 2px solid var(--color-ink); outline-offset: 2px; }
+
+/* isolation : les calques Leaflet (z-index jusqu'à 1000) restent sous les tiroirs et menus */
+.leaflet-container { background: var(--color-tile-deep); font-family: var(--font-sans); isolation: isolate; }
+/* fond de carte effacé pour laisser parler les couleurs des lignes */
+.basemap { filter: grayscale(1) contrast(0.7) brightness(1.12); opacity: 0.55; }
+.train-icon { background: none; border: 0; }
+.leaflet-tooltip.station-tip {
+  background: var(--color-ink); color: white; border: 0; border-radius: 4px;
+  font-stretch: 85%; font-weight: 600; box-shadow: none; padding: 2px 6px;
+}
+.leaflet-tooltip.station-tip::before { display: none; }
+/* noms de stations posés à côté des points quand on zoome */
+.leaflet-tooltip.station-label {
+  background: rgb(255 255 255 / 0.92); color: var(--color-ink); border: 0; border-radius: 3px;
+  font-stretch: 85%; font-weight: 600; font-size: 12px; line-height: 1.2;
+  box-shadow: 0 0 0 1px rgb(29 39 51 / 0.12); padding: 1px 5px;
+}
+.leaflet-tooltip.station-label.is-strong { background: var(--color-ink); color: white; font-size: 13px; }
+.leaflet-tooltip.station-label::before { display: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+}
+
+@theme inline {
+  --font-heading: var(--font-sans);
+  --font-sans: "Archivo Variable", system-ui, sans-serif;
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --color-background: var(--background);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+:root {
+  /* variables shadcn/ui branchées sur la palette du projet */
+  --background: #eef1ef;
+  --foreground: #1d2733;
+  --card: #ffffff;
+  --card-foreground: #1d2733;
+  --popover: #ffffff;
+  --popover-foreground: #1d2733;
+  --primary: #1d2733;
+  --primary-foreground: #ffffff;
+  --secondary: #eef1ef;
+  --secondary-foreground: #1d2733;
+  --muted: #eef1ef;
+  --muted-foreground: #5b6672;
+  --accent: #dfe4e1;
+  --accent-foreground: #1d2733;
+  --destructive: #e4002b;
+  --border: #d3d9d6;
+  --input: #b9c1bd;
+  --ring: #1d2733;
+  --chart-1: #1d2733;
+  --chart-2: #5b6672;
+  --chart-3: #b9c1bd;
+  --chart-4: #dfe4e1;
+  --chart-5: #eef1ef;
+  --radius: 0.75rem;
+  --sidebar: #ffffff;
+  --sidebar-foreground: #1d2733;
+  --sidebar-primary: #1d2733;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #eef1ef;
+  --sidebar-accent-foreground: #1d2733;
+  --sidebar-border: #d3d9d6;
+  --sidebar-ring: #1d2733;
+}
+
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  button:not(:disabled), [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+  html {
+    @apply font-sans;
+  }
+}
