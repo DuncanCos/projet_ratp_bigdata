@@ -14,7 +14,7 @@ import { Sheet } from "@/components/Sheet";
 import { TripPlanner, TripQuery } from "@/components/TripPlanner";
 import { Button } from "@/components/ui/button";
 import { completePath, extendPath, findRoutes, journeyFromPath, pathEnd } from "@/lib/route";
-import { Route } from "lucide-react";
+import { ChartNoAxesColumn, Route } from "lucide-react";
 
 const VISIBLE_KEY = "metro-live:lignes-affichees";
 /** lignes connues lors du dernier enregistrement : les nouvelles (ex. RER) sont affichées d'office */
@@ -270,6 +270,12 @@ export default function App() {
       >
         <Route className="size-4" />
         <span className={mobile ? "sr-only" : ""}>Itinéraire</span>
+      </Button>
+      <Button asChild variant="outline" className="h-10 gap-2 rounded-full bg-white px-3 shadow-md">
+        <a href="#/donnees" aria-label="Données de fréquentation">
+          <ChartNoAxesColumn className="size-4" />
+          <span className={mobile ? "sr-only" : ""}>Données</span>
+        </a>
       </Button>
       <LineDrawer
         visible={visible}

@@ -1,0 +1,108 @@
+# Métro Live Data : Airflow (orchestration) + Cassandra (stockage) + API (lecture pour la web app)
+#   docker compose up -d --build
+#   Airflow http://localhost:8080   API http://localhost:8000/docs   Cassandra localhost:9042
+
+x-airflow: &airflow
+  build: ./airflow
+  image: metrolive-airflow
+  user: "${AIRFLOW_UID:-1000}:0"
+  environment: &airflow-env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "false"
+    AIRFLOW__CORE__DEFAULT_TIMEZONE: Europe/Paris
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+    AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-apiserver:8080/execution/
+    AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET:-metrolive-dev-secret-a-changer}
+    AIRFLOW__CORE__FERNET_KEY: ""
+    # projet de démonstration en local : pas de mot de passe sur l'interface
+    AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_ALL_ADMINS: "true"
+    PYTHONPATH: /opt/lib
+    METRODATA_DIR: /opt/data
+    CASSANDRA_HOSTS: cassandra
+  volumes:
+    - ./dags:/opt/airflow/dags:z
+    - ./lib:/opt/lib:z
+    - ./data:/opt/data:z
+    - airflow-logs:/opt/airflow/logs
+  depends_on: &airflow-deps
+    postgres: { condition: service_healthy }
+    cassandra: { condition: service_healthy }
+
+services:
+  cassandra:
+    image: cassandra:5.0
+    environment:
+      CASSANDRA_CLUSTER_NAME: metrolive
+      MAX_HEAP_SIZE: 1G
+      HEAP_NEWSIZE: 256M
+    ports: ["9042:9042"]
+    volumes: [cassandra-data:/var/lib/cassandra]
+    healthcheck:
+      test: ["CMD-SHELL", "cqlsh -e 'describe keyspaces' >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 40s
+
+  postgres:  # métadonnées d'Airflow uniquement
+    image: postgres:17
+    environment: { POSTGRES_USER: airflow, POSTGRES_PASSWORD: airflow, POSTGRES_DB: airflow }
+    volumes: [airflow-db:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 5s
+      retries: 10
+
+  airflow-init:
+    <<: *airflow
+    user: "0:0"
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        mkdir -p /opt/data /opt/airflow/logs && chown -R "${AIRFLOW_UID:-1000}:0" /opt/data /opt/airflow/logs
+        exec /entrypoint airflow db migrate
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  airflow-apiserver:
+    <<: *airflow
+    command: api-server
+    ports: ["8080:8080"]
+    depends_on:
+      <<: *airflow-deps
+      airflow-init: { condition: service_completed_successfully }
+
+  airflow-scheduler:
+    <<: *airflow
+    command: scheduler
+    depends_on:
+      <<: *airflow-deps
+      airflow-init: { condition: service_completed_successfully }
+
+  airflow-dag-processor:
+    <<: *airflow
+    command: dag-processor
+    depends_on:
+      <<: *airflow-deps
+      airflow-init: { condition: service_completed_successfully }
+
+  api:
+    build: ./api
+    image: metrolive-api
+    environment:
+      CASSANDRA_HOSTS: cassandra
+      METRODATA_DIR: /opt/data
+    volumes:
+      - ./api:/app:z
+      - ./lib:/opt/lib:z
+      - ./data:/opt/data:z
+    ports: ["8000:8000"]
+    depends_on:
+      cassandra: { condition: service_healthy }
+
+volumes:
+  cassandra-data:
+  airflow-db:
+  airflow-logs:

@@ -1,0 +1,8 @@
+cassandra-driver>=3.29.2
+pandas
+pyarrow
+openpyxl
+requests
+scikit-learn
+joblib
+matplotlib

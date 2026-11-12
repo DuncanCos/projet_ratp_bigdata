@@ -4,6 +4,14 @@ Application de bureau (Rust + Tauri 2, React, Tailwind) qui affiche en temps ré
 des rames sur les 16 lignes du métro parisien et les 5 lignes de RER (A à E), à partir des données
 d'Île-de-France Mobilités.
 
+## Volet données : fréquentation et prédiction
+
+En plus de la carte temps réel, le projet contient un pipeline de données ouvertes (dossier `pipeline/`) :
+Apache Airflow collecte et nettoie onze ans de validations du réseau ferré d'Île-de-France, Cassandra les
+stocke, un modèle prédit la fréquentation de chaque station à 14 jours, et un tableau de bord React
+(bouton « Données », ou `npm run dev` dans un navigateur) restitue le tout avec des filtres par période,
+ligne, station et titre de transport. Détails et mise en route : [pipeline/README.md](pipeline/README.md).
+
 ## Lancer
 
 ```bash
