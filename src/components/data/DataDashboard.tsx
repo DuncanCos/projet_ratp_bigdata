@@ -7,6 +7,8 @@ import { AnalyseTab, Filtres } from "./AnalyseTab";
 import { PredictionTab } from "./PredictionTab";
 import { PipelineTab } from "./PipelineTab";
 import { Empty, Pastille, nomLigne, useApi } from "./kit";
+import { carteHref, hashParams } from "@/lib/frequentation";
+import { LINES } from "@/lib/metro";
 
 type Onglet = "analyse" | "prediction" | "pipeline";
 const ONGLETS: [Onglet, string][] = [["analyse", "Analyse"], ["prediction", "Prédiction"], ["pipeline", "Pipeline"]];
@@ -20,8 +22,18 @@ export function DataDashboard({ carte }: { carte: boolean }) {
   const [periode, setPeriode] = useState("1a");
   const [debut, setDebut] = useState("");
   const [fin, setFin] = useState("");
-  const [ligne, setLigne] = useState<string | null>(null);
-  const [station, setStation] = useState<number | null>(null);
+  // « #/donnees?ligne=…&station=… » : on arrive de la carte avec la ligne ou la station qu'on regardait
+  const [ligne, setLigne] = useState<string | null>(() => hashParams().ligne);
+  const [station, setStation] = useState<number | null>(() => hashParams().station);
+  useEffect(() => {
+    const on = () => {
+      if (!window.location.hash.startsWith("#/donnees?")) return;
+      setLigne(hashParams().ligne);
+      setStation(hashParams().station);
+    };
+    window.addEventListener("hashchange", on);
+    return () => window.removeEventListener("hashchange", on);
+  }, []);
   const [categorie, setCategorie] = useState<string | null>(null);
   const [pasChoisi, setPasChoisi] = useState<Filtres["pas"] | null>(null);
   const [recherche, setRecherche] = useState("");
@@ -33,6 +45,11 @@ export function DataDashboard({ carte }: { carte: boolean }) {
     setFin(m.jour_max);
     setDebut(jours == null ? m.jour_min : decale(m.jour_max, -jours + 1) < m.jour_min ? m.jour_min : decale(m.jour_max, -jours + 1));
   }, [m, periode]);
+
+  // une ligne venue de l'adresse mais inconnue du référentiel est ignorée
+  useEffect(() => {
+    if (m && ligne && !m.lignes.some((l) => l.id === ligne)) setLigne(null);
+  }, [m, ligne]);
 
   const toutes = useApi<StationRef[]>("/api/stations");
   const stations = useMemo(() => (toutes.data ?? []).filter((s) => !ligne || s.lignes.includes(ligne)), [toutes.data, ligne]);
@@ -60,7 +77,7 @@ export function DataDashboard({ carte }: { carte: boolean }) {
   const champ = "h-9 rounded-md border border-input bg-white px-2 text-sm";
 
   return (
-    <Shell carte={carte} sousTitre={`Validations du ${dateLongue(m.jour_min!)} au ${dateLongue(m.jour_max)}, ${m.nb_stations} gares et stations`}>
+    <Shell carte={carte} ligne={ligne} sousTitre={`Validations du ${dateLongue(m.jour_min!)} au ${dateLongue(m.jour_max)}, ${m.nb_stations} gares et stations`}>
       <nav className="flex gap-1 border-b border-border" aria-label="Sections">
         {ONGLETS.map(([k, label]) => (
           <button
@@ -178,7 +195,7 @@ function Champ({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-function Shell({ carte, sousTitre, children }: { carte: boolean; sousTitre?: string; children: React.ReactNode }) {
+function Shell({ carte, ligne, sousTitre, children }: { carte: boolean; ligne?: string | null; sousTitre?: string; children: React.ReactNode }) {
   return (
     <div className="h-full overflow-y-auto">
       <div className="mx-auto flex max-w-[1240px] flex-col gap-3 px-4 py-5">
@@ -189,7 +206,10 @@ function Shell({ carte, sousTitre, children }: { carte: boolean; sousTitre?: str
           </div>
           {carte && (
             <Button asChild variant="outline" className="h-9 gap-2 rounded-full bg-white">
-              <a href="#/"><MapIcon className="size-4" />Carte en direct</a>
+              <a href={carteHref(ligne && LINES.some((l) => l.id === ligne) ? ligne : null)}>
+                <MapIcon className="size-4" />
+                {ligne && LINES.some((l) => l.id === ligne) ? "Voir la ligne sur la carte" : "Carte en direct"}
+              </a>
             </Button>
           )}
         </header>

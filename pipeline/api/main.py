@@ -227,3 +227,97 @@ def pipeline():
 @app.get("/api/sante")
 def sante():
     return {"ok": True, "jours": len(reseau())}
+
+
+# ---------- résumés pour la carte temps réel (appli de bureau) ----------
+
+def _type_jour(j: date) -> list[str]:
+    """Types de jour des profils horaires, du plus précis au plus général."""
+    c = contexte().get(j, {})
+    vac = "VS" if c.get("vacances") else "HV"
+    if c.get("ferie") or j.weekday() == 6:
+        return ["DIJFP"]
+    return [f"SA{vac}", "SAHV"] if j.weekday() == 5 else [f"JO{vac}", "JOHV"]
+
+
+def _mots(nom: str) -> set[str]:
+    import unicodedata
+    plat = unicodedata.normalize("NFKD", nom.lower()).encode("ascii", "ignore").decode()
+    return {m for m in re.split(r"[^a-z0-9]+", plat) if len(m) > 1}
+
+
+def _resoudre(id_zdc: int, nom: str | None) -> dict | None:
+    """Station de l'API pour une station de la carte : même identifiant, sinon nom emboîté
+    (« Châtelet - Les Halles » sur la carte, « Les Halles » dans les validations)."""
+    st = stations()
+    s = st.get(id_zdc)
+    if s and s["moyenne_jour"]:
+        return s
+    if not nom:
+        return None
+    cible = _mots(nom)
+    best = None
+    for x in st.values():
+        m = _mots(x["nom"] or "")
+        if x["moyenne_jour"] and m and (m <= cible or cible <= m):
+            cle = (len(m & cible), x["moyenne_jour"])
+            if best is None or cle > best[0]:
+                best = (cle, x)
+    return best[1] if best else None
+
+
+@app.get("/api/stations/{id_zdc}/resume")
+def resume_station(id_zdc: int, nom: str | None = None):
+    """L'essentiel d'une station : niveau habituel, prédiction des prochains jours, profil horaire du jour."""
+    s = _resoudre(id_zdc, nom)
+    if not s:
+        raise HTTPException(404, "Station sans données de validation.")
+    z, auj = s["id_zdc"], date.today()
+    actives = sorted((x["moyenne_jour"] for x in stations().values() if x["moyenne_jour"]), reverse=True)
+    pred = db.query("SELECT jour, prevu FROM predictions WHERE id_zdc = %s AND jour >= %s AND jour <= %s",
+                    (z, auj, auj + timedelta(days=2)))
+    profils = db.query("SELECT cat_jour, heure, pourcentage FROM profil_horaire WHERE id_zdc = %s", (z,))
+    cat = next((c for c in _type_jour(auj) if any(p["cat_jour"] == c for p in profils)), None)
+    return {
+        "id_zdc": z, "nom": s["nom"], "moyenne_jour": round(s["moyenne_jour"]),
+        "rang": actives.index(s["moyenne_jour"]) + 1, "nb_stations": len(actives),
+        "previsions": sorted(({"jour": d(p["jour"]), "prevu": p["prevu"]} for p in pred), key=lambda p: p["jour"]),
+        "type_jour": cat,
+        "profil": sorted(({"heure": p["heure"], "pourcentage": p["pourcentage"]} for p in profils if p["cat_jour"] == cat),
+                         key=lambda p: p["heure"]),
+    }
+
+
+@app.get("/api/lignes/{ligne}/resume")
+def resume_ligne(ligne: str):
+    """L'essentiel d'une ligne : niveau des 12 derniers mois, évolution, série par semaine, poids de chaque station."""
+    l = next((x for x in lignes() if x["id"] == ligne), None)
+    if not l:
+        raise HTTPException(404, "Ligne inconnue.")
+    def load():
+        _, fin = bornes(None, None)
+        rows = jours(fin - timedelta(days=727), fin, ligne, None, None)
+        if not rows:
+            raise HTTPException(404, "Ligne sans données de validation.")
+        coupe = fin - timedelta(days=363)
+        recents = [r for r in rows if r["jour"] > coupe]
+        avant = {r["jour"] + timedelta(days=364): r["total"] for r in rows if r["jour"] <= coupe}
+        communs = [(r["total"], avant[r["jour"]]) for r in recents if r["jour"] in avant]
+        sem = defaultdict(lambda: [0, 0])
+        for r in recents:
+            a = sem[r["jour"] - timedelta(days=r["jour"].weekday())]
+            a[0] += r["total"]
+            a[1] += 1
+        st = stations()
+        auj = date.today()
+        prevu = sum(p["prevu"] for z in l["stations"]
+                    for p in db.query("SELECT prevu FROM predictions WHERE id_zdc = %s AND jour = %s", (z, auj)))
+        return {
+            "id": ligne, "nom": l["nom"], "jour_max": fin,
+            "moyenne_jour": round(sum(r["total"] for r in recents) / len(recents)),
+            "evolution": (sum(a for a, _ in communs) / sum(b for _, b in communs) - 1) if communs else None,
+            "prevu_aujourdhui": prevu or None,
+            "semaines": [{"jour": k, "moyenne": round(t / n)} for k, (t, n) in sorted(sem.items()) if n == 7],
+            "stations": {z: round(st[z]["moyenne_jour"]) for z in l["stations"] if z in st and st[z]["moyenne_jour"]},
+        }
+    return cached(f"resume_ligne:{ligne}:{date.today()}", 600, load)

@@ -31,7 +31,7 @@ export function Card({ title, hint, children, className = "", loading = false }:
   title: string; hint?: ReactNode; children: ReactNode; className?: string; loading?: boolean;
 }) {
   return (
-    <section className={`rounded-xl border border-border bg-white p-4 ${className}`}>
+    <section className={`min-w-0 rounded-xl border border-border bg-white p-4 ${className}`}>
       <h3 className="text-[15px] font-semibold leading-tight">{title}</h3>
       {hint && <p className="mt-0.5 text-xs text-ink-soft">{hint}</p>}
       <div className={`mt-3 transition-opacity ${loading ? "opacity-50" : ""}`}>{children}</div>

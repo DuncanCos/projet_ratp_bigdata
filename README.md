@@ -12,6 +12,12 @@ stocke, un modèle prédit la fréquentation de chaque station à 14 jours, et u
 (bouton « Données », ou `npm run dev` dans un navigateur) restitue le tout avec des filtres par période,
 ligne, station et titre de transport. Détails et mise en route : [pipeline/README.md](pipeline/README.md).
 
+La carte et les données sont reliées, car elles partagent les identifiants de lignes et de stations d'IDFM :
+le plan d'une ligne affiche sa fréquentation, la prévision du jour et le poids de chaque station ; le panneau
+d'une station donne sa moyenne, les prévisions du jour et du lendemain et ses heures chargées ; un lien ouvre
+le tableau de bord déjà filtré, et le tableau de bord renvoie vers la ligne sur la carte. Ces encarts
+n'apparaissent que si la stack de données tourne.
+
 ## Lancer
 
 ```bash

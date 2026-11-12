@@ -195,7 +195,7 @@ export function AnalyseTab({ f, meta, onStation }: { f: Filtres; meta: Meta; onS
         )}
       </Card>
 
-      <div className="grid gap-3 lg:col-span-3">
+      <div className="grid min-w-0 gap-3 lg:col-span-3">
         <Card title="Selon le jour de la semaine" hint="Validations par jour en moyenne, hors jours fériés">
           <ResponsiveContainer width="100%" height={150}>
             <BarChart data={parJour} margin={{ top: 16, right: 8, left: 0, bottom: 0 }}>

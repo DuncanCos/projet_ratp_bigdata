@@ -15,6 +15,7 @@ import { TripPlanner, TripQuery } from "@/components/TripPlanner";
 import { Button } from "@/components/ui/button";
 import { completePath, extendPath, findRoutes, journeyFromPath, pathEnd } from "@/lib/route";
 import { ChartNoAxesColumn, Route } from "lucide-react";
+import { dataHref, hashParams, zdc } from "@/lib/frequentation";
 
 const VISIBLE_KEY = "metro-live:lignes-affichees";
 /** lignes connues lors du dernier enregistrement : les nouvelles (ex. RER) sont affichées d'office */
@@ -88,7 +89,11 @@ function useTripQuery() {
 }
 
 export default function App() {
-  const [focused, setFocused] = useState<string | null>(null);
+  // « #/?ligne=C01371 » : retour du tableau de bord sur la ligne qu'on y regardait
+  const [focused, setFocused] = useState<string | null>(() => {
+    const l = hashParams().ligne;
+    return l && LINES.some((x) => x.id === l) ? l : null;
+  });
   const [station, setStation] = useState<{ lineId: string; index: number } | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [showKey, setShowKey] = useState(false);
@@ -272,7 +277,10 @@ export default function App() {
         <span className={mobile ? "sr-only" : ""}>Itinéraire</span>
       </Button>
       <Button asChild variant="outline" className="h-10 gap-2 rounded-full bg-white px-3 shadow-md">
-        <a href="#/donnees" aria-label="Données de fréquentation">
+        <a
+          href={dataHref({ ligne: station?.lineId ?? focused, station: station ? zdc(lineById(station.lineId).stations[station.index]) : null })}
+          aria-label="Données de fréquentation"
+        >
           <ChartNoAxesColumn className="size-4" />
           <span className={mobile ? "sr-only" : ""}>Données</span>
         </a>

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Departure, Disruption, api, cleanTitle, formatWhen, minutesUntil } from "../lib/api";
 import { Access, Line, lineById, lineTitle } from "../lib/metro";
 import { Roundel } from "./Roundel";
+import { StationFrequentation } from "./Frequentation";
 import { Button } from "@/components/ui/button";
 import { ChevronLeft, Flag, MapPin } from "lucide-react";
 
@@ -139,6 +140,8 @@ export function StationPanel({ line, index, now, disruptions, onSelectStation, o
             </ul>
           </div>
         )}
+
+        <StationFrequentation key={station.id} line={line} station={station} />
 
         <div className="mt-4 border-t border-rail pt-3">
           <h4 className="text-sm font-semibold">Accessibilité</h4>

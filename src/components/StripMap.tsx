@@ -5,6 +5,10 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Line, branchName, branches, isRer, lineTitle } from "../lib/metro";
 import { Roundel } from "./Roundel";
+import { LineFrequentation } from "./Frequentation";
+import { useApi } from "./data/kit";
+import { entier } from "@/lib/dataApi";
+import { LigneResume, zdc } from "@/lib/frequentation";
 
 const ROW = 38;
 
@@ -43,6 +47,10 @@ export function StripMap({ line, trains, disruptions, live, now, selected, onSta
   });
   const nDown = placed.filter((p) => p.down).length;
   const hit = disruptedStations(disruptions ?? undefined);
+  // volet données : validations par jour de chaque station (absent si l'API de données est arrêtée)
+  const { data: resume } = useApi<LigneResume>(`/api/lignes/${line.id}/resume`);
+  const affluence = (s: number) => resume?.stations[zdc(line.stations[s])] ?? null;
+  const affluenceMax = Math.max(1, ...order.map((s) => affluence(s) ?? 0));
 
   return (
     <section className="flex min-h-0 flex-1 flex-col">
@@ -62,6 +70,7 @@ export function StripMap({ line, trains, disruptions, live, now, selected, onSta
           </p>
         </div>
       </header>
+      <LineFrequentation line={line} resume={resume} />
       {disruptions && (
         <div className="border-b border-rail">
           <TrafficList disruptions={disruptions} />
@@ -88,6 +97,7 @@ export function StripMap({ line, trains, disruptions, live, now, selected, onSta
         <span>
           ↓ {nDown} vers {terminusDown} &nbsp; ↑ {placed.length - nDown} vers {line.stations[order[0]].name}
         </span>
+        {resume && <span>validations par jour</span>}
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-2">
         <div className="relative" style={{ height: order.length * ROW }}>
@@ -119,10 +129,19 @@ export function StripMap({ line, trains, disruptions, live, now, selected, onSta
                 >
                   {st.name}
                 </span>
-                {hit.has(s) && (
+                {hit.has(s) ? (
                   <Badge variant="destructive" className="ml-auto mr-2 shrink-0">
                     perturbé
                   </Badge>
+                ) : (
+                  affluence(s) != null && (
+                    <span
+                      className="ml-auto mr-1 flex w-16 shrink-0 justify-end"
+                      title={`${entier(affluence(s)!)} validations par jour en moyenne`}
+                    >
+                      <span className="h-1.5 rounded-full bg-ink-soft/60" style={{ width: `${Math.max(4, (affluence(s)! / affluenceMax) * 100)}%` }} />
+                    </span>
+                  )
                 )}
               </button>
             );
