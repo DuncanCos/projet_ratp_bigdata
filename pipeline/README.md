@@ -67,6 +67,25 @@ ne commence qu'au premier relevé, et un incident de moins de 10 minutes survenu
 être manqué. Une perturbation qui disparaît du flux avant sa fin annoncée est considérée terminée
 10 minutes après le dernier relevé qui la montrait (`fin_observee` dans l'API).
 
+### Temps réel reçu par l'appli de bureau
+
+L'appli de bureau envoie à l'API (`POST /api/temps-reel`, adresse réglable par `METRO_DATA_API`) chaque
+vraie réponse PRIM qu'elle reçoit : positions des trains d'une ligne (`estimated-timetable`) et prochains
+passages à une station (`stop-monitoring`). Envoi en tâche de fond, erreurs ignorées : stack arrêtée, rien
+n'est gardé et l'appli n'en est pas gênée. On n'archive donc que ce que l'appli a réellement demandé à PRIM
+(en pratique la ligne choisie, pendant que l'appli est ouverte et que la stack tourne), pas tout le réseau
+en continu : le quota PRIM (1 000 appels par jour) ne permet pas un relevé permanent de toutes les lignes.
+
+| Route | Rôle |
+|---|---|
+| `POST /api/temps-reel` | écriture d'un relevé (`releve_ms`, `positions`, `passages`) ; corps invalide : 422 |
+| `GET /api/temps-reel/positions?ligne=&jour=` | positions d'une ligne un jour donné, par relevé |
+| `GET /api/temps-reel/passages?ligne=&jour=&station=` | passages relevés : heure attendue et heure prévue |
+| `GET /api/temps-reel/resume?jour=` | par ligne : nombre de relevés, premier et dernier, volumes |
+
+`jour` vaut aujourd'hui (heure de Paris) par défaut ; `limite` (5 000 par défaut) borne le nombre de lignes.
+L'API est une API locale de démonstration, sans authentification.
+
 ## Nettoyage
 
 En onze ans le format publié a changé presque chaque année. `lib/metrodata/transform.py` ramène tout à un
@@ -101,6 +120,8 @@ Une table par requête de l'application, comme le veut Cassandra (pas de jointur
 | `predictions`, `predictions_reseau` | `(id_zdc)`, `jour` | sorties du modèle |
 | `perturbations_jour` | `(jour)`, `ligne`, `id` | toutes les perturbations d'une journée |
 | `perturbations_ligne` | `(ligne)`, `jour` décroissant, `id` | historique des perturbations d'une ligne |
+| `positions_temps_reel` | `(ligne, jour)`, `releve`, `train` | rejouer les positions réelles d'une ligne un jour donné |
+| `passages_temps_reel` | `(ligne, jour)`, `station`, `releve`, `attendu`, `destination` | heure attendue contre heure prévue à une station (retards) |
 | `modele_metriques`, `chargements` | | suivi du modèle et du pipeline |
 | `stations`, `lignes` | | dimensions |
 
@@ -133,6 +154,6 @@ pipeline/
   docker-compose.yml
   dags/                 les 6 DAGs
   lib/metrodata/        extract, transform, load, model, db (partagé entre Airflow et l'API)
-  api/main.py           API de lecture
+  api/main.py           API (lecture, et écriture du temps réel envoyé par l'appli)
   data/                 raw (fichiers publiés), silver (parquet), models, figures ; non versionné
 ```

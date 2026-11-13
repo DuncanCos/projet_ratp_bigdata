@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { journeeEnCours, passagesPrevus } from "./journee";
 
 export interface NextStop { station: number; atMs: number }
 export interface Train {
@@ -11,6 +12,8 @@ export interface Train {
   atStation: boolean;
   destination: string;
   nextStops: NextStop[];
+  /** placé d'après les horaires prévus (GTFS), et non d'après le temps réel de PRIM */
+  prevu?: boolean;
 }
 export interface Quota {
   limit: number | null;
@@ -19,11 +22,11 @@ export interface Quota {
   blockedUntilMs: number | null;
 }
 export interface TrainsResponse {
-  /** pas de clé API : tout est simulé */
+  /** pas de clé API : aucun temps réel, tout suit les horaires prévus */
   demo: boolean;
   fetchedAtMs: number;
   trains: Train[];
-  /** lignes en temps réel ; les autres sont simulées */
+  /** lignes en temps réel ; les autres suivent les horaires prévus */
   liveLines: string[];
   errors: Record<string, string>;
   quota: Quota;
@@ -37,6 +40,7 @@ export interface Departure {
   aimedMs: number | null;
   platform: string | null;
   atStop: boolean;
+  /** « prévu » : horaire théorique, faute de temps réel */
   status: string | null;
 }
 export interface Disruption {
@@ -65,8 +69,11 @@ export const api = {
   setKey: (key: string) => invoke<void>("set_api_key", { key }),
   trains: (lineIds: string[], liveIds: string[]) => invoke<TrainsResponse>("get_trains", { lineIds, liveIds }),
   traffic: () => invoke<TrafficInfo>("get_traffic"),
-  departures: (lineId: string, stationIndex: number) =>
-    invoke<Departure[]>("get_departures", { lineId, stationIndex }),
+  /** Prochains passages : le temps réel de PRIM s'il répond, sinon les horaires prévus. */
+  departures: async (lineId: string, stationIndex: number) => {
+    const reel = await invoke<Departure[]>("get_departures", { lineId, stationIndex }).catch(() => [] as Departure[]);
+    return reel.length ? reel : passagesPrevus(await journeeEnCours(), Date.now(), lineId, stationIndex);
+  },
 };
 
 /** Avancement 0..1 d'un train sur son segment à l'instant `now`. */

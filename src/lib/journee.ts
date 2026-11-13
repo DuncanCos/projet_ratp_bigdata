@@ -3,6 +3,8 @@
  * du GTFS (`src/data/journee.json`, généré par `scripts/build_day_schedule.py`).
  * Ce ne sont pas les positions réelles : PRIM ne garde pas d'historique.
  */
+import type { Departure, Train } from "./api";
+import { decale, iso } from "./dataApi";
 import { LINES, Line, segmentPoints } from "./metro";
 
 export type TypeJour = "semaine" | "samedi" | "dimanche";
@@ -17,6 +19,7 @@ interface GabaritBrut {
   p?: number[];
 }
 interface Brut {
+  validite: { debut: string; fin: string };
   gabarits: Record<string, GabaritBrut[]>;
   jours: Record<TypeJour, { date: string; courses: Record<string, number[]> }>;
 }
@@ -46,6 +49,8 @@ export interface Journee {
   type: TypeJour;
   /** date du GTFS dont viennent les horaires */
   date: string;
+  /** période couverte par le GTFS (« AAAA-MM-JJ ») : hors de là, ce n'est qu'un jour type */
+  validite: { debut: string; fin: string };
   /** première et dernière seconde de service (depuis minuit, au-delà de 24 h après minuit) */
   debut: number;
   fin: number;
@@ -107,8 +112,15 @@ function gabaritsDe(data: Brut, line: Line, ligne: number): Gabarit[] {
   return gs;
 }
 
+const journees = new Map<TypeJour, Promise<Journee>>();
 /** Charge (une fois) les horaires et prépare la journée demandée. */
-export async function chargerJournee(type: TypeJour): Promise<Journee> {
+export function chargerJournee(type: TypeJour): Promise<Journee> {
+  let j = journees.get(type);
+  if (!j) journees.set(type, (j = preparer(type)));
+  return j;
+}
+
+async function preparer(type: TypeJour): Promise<Journee> {
   brut ??= import("../data/journee.json").then((m) => m.default as unknown as Brut);
   const data = await brut;
   const jour = data.jours[type];
@@ -133,6 +145,7 @@ export async function chargerJournee(type: TypeJour): Promise<Journee> {
   return {
     type,
     date: jour.date,
+    validite: data.validite,
     debut,
     fin,
     departs: Int32Array.from(toutes, (c) => c.depart),
@@ -200,3 +213,78 @@ export const heure = (s: number) => {
   const m = Math.floor(s / 60);
   return `${String(Math.floor(m / 60) % 24).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
 };
+
+/** Jour de service et seconde en cours : avant 3 h 30, on est encore dans la journée de la veille. */
+export function maintenant(ms = Date.now()) {
+  const n = new Date(ms);
+  const s = n.getHours() * 3600 + n.getMinutes() * 60 + n.getSeconds() + n.getMilliseconds() / 1000;
+  return s < 3.5 * 3600 ? { date: decale(iso(n), -1), t: s + 86400 } : { date: iso(n), t: s };
+}
+
+/** Horaires du jour de service en cours. */
+export const journeeEnCours = () => chargerJournee(typeDuJour(maintenant().date));
+
+/**
+ * Trains des lignes demandées à l'instant `ms`, placés d'après les horaires prévus : même forme
+ * que les trains temps réel de PRIM, marqués `prevu`. `j` doit être la journée du jour type en cours.
+ */
+export function trainsPrevus(j: Journee, ms: number, lignes: Set<string>): Train[] {
+  const { t } = maintenant(ms);
+  const minuit = ms - t * 1000;
+  const out: Train[] = [];
+  const fin = premiereApres(j, t);
+  for (let i = premiereApres(j, t - j.dureeMax - 1); i < fin; i++) {
+    const g = j.gabarits[i];
+    const rel = t - j.departs[i];
+    const line = LINES[g.ligne];
+    if (rel > g.duree || !lignes.has(line.id)) continue;
+    const dernier = g.arr.length - 2;
+    let k = 0;
+    while (k < dernier && rel >= g.arr[k + 1]) k++;
+    const aQuai = rel <= g.dep[k];
+    const depart = minuit + j.departs[i] * 1000;
+    out.push({
+      id: `prevu-${i}`,
+      lineId: line.id,
+      from: g.arrets[k],
+      to: g.arrets[aQuai ? k : k + 1],
+      departAtMs: depart + (aQuai ? g.arr[k] : g.dep[k]) * 1000,
+      arriveAtMs: depart + (aQuai ? g.dep[k] : g.arr[k + 1]) * 1000,
+      atStation: aQuai,
+      destination: line.stations[g.arrets[g.arrets.length - 1]].name,
+      nextStops: g.arrets.slice(k + 1, k + 5).map((station, n) => ({ station, atMs: depart + g.arr[k + 1 + n] * 1000 })),
+      prevu: true,
+    });
+  }
+  return out;
+}
+
+/** Prochains passages prévus à une station dans l'heure qui vient (statut « prévu »). */
+export function passagesPrevus(j: Journee, ms: number, lineId: string, station: number): Departure[] {
+  const { t } = maintenant(ms);
+  const minuit = ms - t * 1000;
+  const out: Departure[] = [];
+  const fin = premiereApres(j, t + 3600);
+  for (let i = premiereApres(j, t - j.dureeMax - 1); i < fin; i++) {
+    const g = j.gabarits[i];
+    const line = LINES[g.ligne];
+    if (line.id !== lineId) continue;
+    const k = g.arrets.indexOf(station);
+    // au terminus d'arrivée, personne ne monte
+    if (k < 0 || k === g.arrets.length - 1) continue;
+    const arrivee = j.departs[i] + g.arr[k];
+    const depart = j.departs[i] + g.dep[k];
+    if (depart < t || arrivee > t + 3600) continue;
+    out.push({
+      lineId,
+      destination: line.stations[g.arrets[g.arrets.length - 1]].name,
+      direction: "",
+      expectedMs: minuit + Math.max(arrivee, t) * 1000,
+      aimedMs: minuit + arrivee * 1000,
+      platform: null,
+      atStop: arrivee <= t,
+      status: "prévu",
+    });
+  }
+  return out.sort((a, b) => (a.expectedMs ?? 0) - (b.expectedMs ?? 0));
+}

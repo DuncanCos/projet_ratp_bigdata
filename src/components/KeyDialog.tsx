@@ -51,7 +51,7 @@ export function KeyDialog({ open, settings, onOpenChange, onSaved }: Props) {
             <DialogTitle>Clé API PRIM</DialogTitle>
             <DialogDescription>
               Le temps réel vient de la plateforme PRIM d'Île-de-France Mobilités. Créez un compte gratuit, générez un
-              jeton et collez-le ici. Sans clé, les trains sont simulés.
+              jeton et collez-le ici. Sans clé, les trains suivent les horaires prévus.
             </DialogDescription>
           </DialogHeader>
           <Button

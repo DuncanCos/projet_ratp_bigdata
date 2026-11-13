@@ -1,3 +1,4 @@
+mod archive;
 mod positions;
 mod prim;
 mod topology;
@@ -75,11 +76,11 @@ async fn set_api_key(state: State<'_, AppState>, key: String) -> Result<(), Stri
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct TrainsResponse {
-    /// aucune clé API : tout est simulé
+    /// aucune clé API : pas de temps réel
     demo: bool,
     fetched_at_ms: i64,
     trains: Vec<Train>,
-    /// lignes réellement en temps réel (les autres : horaires théoriques)
+    /// lignes réellement en temps réel, les seules dont les trains sont renvoyés
     live_lines: Vec<String>,
     errors: HashMap<String, String>,
     quota: prim::Quota,
@@ -87,20 +88,21 @@ struct TrainsResponse {
     quota_blocked_until_ms: Option<i64>,
 }
 
-async fn journeys_for(state: &AppState, key: &str, line_id: &str) -> Result<Vec<Journey>, String> {
+/// Courses d'une ligne ; le booléen indique une vraie réponse PRIM (pas le cache).
+async fn journeys_for(state: &AppState, key: &str, line_id: &str) -> Result<(Vec<Journey>, bool), String> {
     if let Some((at, j)) = state.cache.lock().await.get(line_id) {
         if at.elapsed() < CACHE_TTL {
-            return Ok(j.clone());
+            return Ok((j.clone(), false));
         }
     }
     let j = prim::estimated_timetable(&state.http, key, line_id).await?;
     state.cache.lock().await.insert(line_id.to_string(), (Instant::now(), j.clone()));
-    Ok(j)
+    Ok((j, true))
 }
 
 /// Positions des trains. `live_ids` : lignes à interroger en temps réel (le
-/// quota PRIM est de 1 000 requêtes par jour) ; les autres lignes de
-/// `line_ids` sont placées d'après les horaires théoriques.
+/// quota PRIM est de 1 000 requêtes par jour). Seules ces lignes ont des
+/// trains dans la réponse : le front place les autres d'après les horaires GTFS.
 #[tauri::command]
 async fn get_trains(
     state: State<'_, AppState>,
@@ -120,20 +122,19 @@ async fn get_trains(
         let results = futures::future::join_all(live.iter().map(|l| journeys_for(&state, key, &l.id))).await;
         for (line, res) in live.iter().zip(results) {
             match res {
-                Ok(j) => {
-                    trains.extend(positions::from_journeys(line, &j, now_ms()));
+                Ok((j, fresh)) => {
+                    let at = now_ms();
+                    let t = positions::from_journeys(line, &j, at);
+                    if fresh {
+                        archive::send(&state.http, archive::positions(line, &t, at));
+                    }
+                    trains.extend(t);
                     live_lines.push(line.id.clone());
                 }
                 Err(e) => {
                     errors.insert(line.id.clone(), e);
                 }
             }
-        }
-    }
-    // tout ce qui n'est pas en temps réel : horaires théoriques
-    for l in &lines {
-        if !live_lines.contains(&l.id) {
-            trains.extend(positions::simulate(l, now));
         }
     }
     Ok(TrainsResponse {
@@ -168,7 +169,8 @@ async fn get_traffic(state: State<'_, AppState>) -> Result<traffic::TrafficInfo,
     Ok(info)
 }
 
-/// Prochains passages d'une ligne à une station.
+/// Prochains passages d'une ligne à une station. Sans clé API : liste vide
+/// (le front se rabat sur les horaires prévus).
 #[tauri::command]
 async fn get_departures(
     state: State<'_, AppState>,
@@ -177,30 +179,10 @@ async fn get_departures(
 ) -> Result<Vec<Departure>, String> {
     let line = topology::line(&line_id).ok_or("Ligne inconnue")?;
     let station = line.stations.get(station_index).ok_or("Station inconnue")?;
-    match state.api_key().await {
-        Some(key) => prim::stop_monitoring(&state.http, &key, &station.id, &line_id).await,
-        None => {
-            let now = now_ms();
-            let mut deps: Vec<Departure> = positions::simulate(line, now)
-                .into_iter()
-                .filter_map(|t| {
-                    let ns = t.next_stops.iter().find(|n| n.station == station_index)?;
-                    Some(Departure {
-                        line_id: line_id.clone(),
-                        destination: t.destination.clone(),
-                        direction: String::new(),
-                        expected_ms: Some(ns.at_ms),
-                        aimed_ms: None,
-                        platform: None,
-                        at_stop: t.at_station && t.from == station_index,
-                        status: Some("démo".into()),
-                    })
-                })
-                .collect();
-            deps.sort_by_key(|d| d.expected_ms);
-            Ok(deps)
-        }
-    }
+    let Some(key) = state.api_key().await else { return Ok(vec![]) };
+    let deps = prim::stop_monitoring(&state.http, &key, &station.id, &line_id).await?;
+    archive::send(&state.http, archive::passages(line, station, &deps, now_ms()));
+    Ok(deps)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -240,14 +222,6 @@ mod tests {
         let l1 = topology::line("C01371").unwrap();
         assert_eq!(l1.stations.len(), 25);
         assert!(l1.quay_index.contains_key("463193"));
-    }
-
-    #[test]
-    fn simulation_produces_trains() {
-        for l in &topology::network().lines {
-            let t = positions::simulate(l, now_ms());
-            assert!(!t.is_empty(), "ligne {}", l.name);
-        }
     }
 
     /// RER A : ligne et missions (Marne-la-Vallée, Cergy…).
@@ -427,6 +401,53 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn archive_body() {
+        let l1 = topology::line("C01371").unwrap();
+        let p = &l1.patterns[0];
+        let (a, b) = (p.stations[3], p.stations[4]);
+        let zone = |s: usize| prim::tail_id(&l1.stations[s].id).parse::<i64>().unwrap();
+        let train = Train {
+            id: "C01371-3-4-0".into(),
+            line_id: l1.id.clone(),
+            from: a,
+            to: b,
+            depart_at_ms: 1_000,
+            arrive_at_ms: 2_000,
+            at_station: false,
+            destination: "Château de Vincennes".into(),
+            next_stops: vec![],
+        };
+        let v = serde_json::to_value(archive::positions(l1, &[train], 42)).unwrap();
+        assert_eq!(v["releve_ms"], 42);
+        assert_eq!(v["passages"].as_array().unwrap().len(), 0);
+        let pos = &v["positions"][0];
+        assert_eq!((pos["ligne"].as_str(), pos["train"].as_str()), (Some("C01371"), Some("C01371-3-4-0")));
+        assert_eq!((pos["de"].as_i64(), pos["vers"].as_i64()), (Some(zone(a)), Some(zone(b))));
+        assert_eq!((pos["depart_ms"].as_i64(), pos["arrivee_ms"].as_i64(), pos["a_quai"].as_bool()), (Some(1_000), Some(2_000), Some(false)));
+
+        let dep = |expected_ms: Option<i64>| Departure {
+            line_id: l1.id.clone(),
+            destination: "La Défense".into(),
+            direction: "Ouest".into(),
+            expected_ms,
+            aimed_ms: None,
+            platform: Some("1".into()),
+            at_stop: true,
+            status: Some("onTime".into()),
+        };
+        // un passage sans heure attendue n'est pas archivé
+        let v = serde_json::to_value(archive::passages(l1, &l1.stations[a], &[dep(Some(5_000)), dep(None)], 42)).unwrap();
+        assert_eq!(v["positions"].as_array().unwrap().len(), 0);
+        let ps = v["passages"].as_array().unwrap();
+        assert_eq!(ps.len(), 1);
+        assert_eq!(ps[0]["station"].as_i64(), Some(zone(a)));
+        assert_eq!(ps[0]["attendu_ms"], 5_000);
+        assert!(ps[0]["prevu_ms"].is_null());
+        assert_eq!((ps[0]["quai"].as_str(), ps[0]["a_quai"].as_bool(), ps[0]["statut"].as_str()), (Some("1"), Some(true), Some("onTime")));
+        assert_eq!(zone(0), 71517);
     }
 
     #[test]

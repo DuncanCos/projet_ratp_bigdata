@@ -662,19 +662,20 @@ function Layers({ lines, focused: focusedProp, trains, now, selectedStation, hit
               key={`${t.lineId}-${t.id}`}
               center={pos}
               radius={3.5}
-              pathOptions={{ color: dir === 0 ? "#fff" : l.color, weight: 1.5, fillColor: dir === 0 ? l.color : "#fff", fillOpacity: 1 }}
+              // horaire prévu : point estompé, pour le distinguer du temps réel
+              pathOptions={{ color: dir === 0 ? "#fff" : l.color, weight: 1.5, fillColor: dir === 0 ? l.color : "#fff", fillOpacity: t.prevu ? 0.65 : 1, opacity: t.prevu ? 0.65 : 1 }}
             >
               <Tooltip className="station-tip" direction="top" offset={[0, -6]}>
-                {lineTitle(l)} vers {t.destination}
+                {lineTitle(l)} vers {t.destination} ({t.prevu ? "horaire prévu" : "temps réel"})
               </Tooltip>
             </CircleMarker>
           );
         const size = focusLine ? (zoom >= 14 ? 34 : 30) : 22;
         return (
-          <Marker key={`${t.lineId}-${t.id}`} position={pos} icon={trainIcon(l, dir, bearing, size)} zIndexOffset={1000}>
+          <Marker key={`${t.lineId}-${t.id}`} position={pos} icon={trainIcon(l, dir, bearing, size)} zIndexOffset={1000} opacity={t.prevu ? 0.7 : 1}>
             <Tooltip className="station-tip" direction="top" offset={[0, -size / 2]}>
               {!focusLine && `${lineTitle(l)} `}vers {t.destination}
-              {t.atStation && `, à quai à ${l.stations[t.from].name}`}
+              {t.atStation && `, à quai à ${l.stations[t.from].name}`} ({t.prevu ? "horaire prévu" : "temps réel"})
             </Tooltip>
           </Marker>
         );

@@ -58,7 +58,9 @@ export function StationPanel({ line, index, now, disruptions, onSelectStation, o
         <Roundel line={line} size={32} />
         <div className="min-w-0">
           <h3 className="truncate text-xl font-bold leading-tight condensed">{station.name}</h3>
-          <p className="text-sm text-ink-soft">Prochains passages</p>
+          <p className="text-sm text-ink-soft">
+            Prochains passages{deps?.length ? (deps[0].status === "prévu" ? " · horaires prévus" : " · temps réel") : ""}
+          </p>
         </div>
       </header>
       <div className="px-4 pb-6 pt-3">

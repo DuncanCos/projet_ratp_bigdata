@@ -1,4 +1,5 @@
-"""API de lecture pour la web app : séries, classements, profils, prédictions. Lecture seule sur Cassandra."""
+"""API locale de démonstration, sans authentification : lecture pour la web app (séries, classements, profils,
+prédictions) et une seule écriture, le temps réel PRIM envoyé par l'appli de bureau (`POST /api/temps-reel`)."""
 import re
 import time
 from collections import defaultdict
@@ -8,10 +9,12 @@ from zoneinfo import ZoneInfo
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
 
 from metrodata import config, db
 
 app = FastAPI(title="Métro Live Data", description="Fréquentation du réseau ferré d'Île-de-France (open data IDFM)")
+# GET seulement : le POST du temps réel vient du Rust de l'appli, pas d'un navigateur
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET"])
 app.mount("/figures", StaticFiles(directory=config.FIGURES), name="figures")
 
@@ -254,6 +257,101 @@ def perturbations(jour: date | None = None, ligne: str | None = None, debut: dat
                         "fin_observee": _utc(obs)})
         return sorted(out, key=lambda r: (-r["jour"].toordinal(), r["ligne"], r["debut"] or ""))
     return cached(f"perturbations:{jour}:{ligne}:{debut}:{fin}", 60, load)
+
+
+# ---------- temps réel PRIM archivé par l'appli de bureau ----------
+
+class Position(BaseModel):
+    ligne: str
+    train: str
+    de: int
+    vers: int
+    depart_ms: int
+    arrivee_ms: int
+    a_quai: bool
+    destination: str
+
+
+class Passage(BaseModel):
+    ligne: str
+    station: int
+    destination: str
+    direction: str = ""
+    attendu_ms: int
+    prevu_ms: int | None = None
+    quai: str | None = None
+    a_quai: bool = False
+    statut: str | None = None
+
+
+class Releve(BaseModel):
+    releve_ms: int = Field(gt=0)
+    positions: list[Position] = []
+    passages: list[Passage] = []
+
+
+def _ms(v: int | None) -> datetime | None:
+    return datetime.fromtimestamp(v / 1000, timezone.utc) if v is not None else None
+
+
+@app.post("/api/temps-reel")
+def ecrire_temps_reel(r: Releve):
+    """Positions d'une ligne ou passages à une station, tels que l'appli les a reçus de PRIM."""
+    releve = _ms(r.releve_ms)
+    jour = releve.astimezone(PARIS).date()
+    pos = [(p.ligne, jour, releve, p.train, p.de, p.vers, _ms(p.depart_ms), _ms(p.arrivee_ms), p.a_quai, p.destination)
+           for p in r.positions]
+    pas = [(p.ligne, jour, p.station, releve, _ms(p.attendu_ms), p.destination, p.direction, _ms(p.prevu_ms), p.quai,
+            p.a_quai, p.statut) for p in r.passages]
+    if pos:
+        db.upsert("positions_temps_reel", ["ligne", "jour", "releve", "train", "de", "vers", "depart", "arrivee",
+                                           "a_quai", "destination"], pos)
+    if pas:
+        db.upsert("passages_temps_reel", ["ligne", "jour", "station", "releve", "attendu", "destination", "direction",
+                                          "prevu", "quai", "a_quai", "statut"], pas)
+    return {"positions": len(pos), "passages": len(pas)}
+
+
+def _lignes_tr(rows: list[dict], cles: tuple[str, ...]) -> list[dict]:
+    return sorted(({**r, "jour": d(r["jour"]), **{k: _utc(r[k]) for k in cles}} for r in rows),
+                  key=lambda r: (r["releve"], r.get("station") or 0))
+
+
+@app.get("/api/temps-reel/positions")
+def positions_temps_reel(ligne: str, jour: date | None = None, limite: int = Query(5000, ge=1, le=100000)):
+    """Positions réelles des trains d'une ligne un jour donné (aujourd'hui à Paris par défaut), par relevé."""
+    j = jour or datetime.now(PARIS).date()
+    rows = db.query("SELECT * FROM positions_temps_reel WHERE ligne = %s AND jour = %s LIMIT %s", (ligne, j, limite))
+    return _lignes_tr(rows, ("releve", "depart", "arrivee"))
+
+
+@app.get("/api/temps-reel/passages")
+def passages_temps_reel(ligne: str, jour: date | None = None, station: int | None = None,
+                        limite: int = Query(5000, ge=1, le=100000)):
+    """Passages relevés sur une ligne (une station ou toutes) : heure attendue et heure prévue."""
+    j = jour or datetime.now(PARIS).date()
+    if station is not None:
+        rows = db.query("SELECT * FROM passages_temps_reel WHERE ligne = %s AND jour = %s AND station = %s LIMIT %s",
+                        (ligne, j, station, limite))
+    else:
+        rows = db.query("SELECT * FROM passages_temps_reel WHERE ligne = %s AND jour = %s LIMIT %s", (ligne, j, limite))
+    return _lignes_tr(rows, ("releve", "attendu", "prevu"))
+
+
+@app.get("/api/temps-reel/resume")
+def resume_temps_reel(jour: date | None = None):
+    """Ce qui a été archivé un jour donné, ligne par ligne (une partition par ligne et par jour)."""
+    j = jour or datetime.now(PARIS).date()
+    out = []
+    for l in lignes():
+        pos = db.query("SELECT releve FROM positions_temps_reel WHERE ligne = %s AND jour = %s", (l["id"], j))
+        pas = db.query("SELECT releve FROM passages_temps_reel WHERE ligne = %s AND jour = %s", (l["id"], j))
+        releves = {r["releve"] for r in pos + pas}
+        if releves:
+            out.append({"ligne": l["id"], "nom": l["nom"], "jour": j, "nb_releves": len(releves),
+                        "premier": _utc(min(releves)), "dernier": _utc(max(releves)),
+                        "nb_positions": len(pos), "nb_passages": len(pas)})
+    return out
 
 
 @app.get("/api/sante")

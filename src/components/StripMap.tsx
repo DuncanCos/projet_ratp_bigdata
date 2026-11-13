@@ -64,7 +64,7 @@ export function StripMap({ line, trains, disruptions, live, now, selected, onSta
                 {trains.length} trains en direct, dont {trains.filter((t) => t.atStation).length} à quai
               </>
             ) : (
-              <>{trains.length} trains simulés (temps réel indisponible)</>
+              <>{trains.length} trains d'après les horaires prévus (pas de temps réel)</>
             )}
             {bs.length > 1 ? ` (${placed.length} sur cette branche)` : ""}
           </p>

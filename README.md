@@ -26,8 +26,8 @@ npm run tauri dev        # développement
 npm run tauri build      # binaire + paquets (deb/rpm/AppImage)
 ```
 
-Sans clé API l'application fonctionne en **mode démo** : les trains sont simulés à partir des temps
-de parcours théoriques du GTFS. Pour le temps réel :
+Sans clé API, les trains sont placés d'après les **horaires prévus** du GTFS (`src/data/journee.json`,
+voir « Journée en accéléré ») et l'interface le signale. Pour le temps réel :
 
 1. créer un compte sur <https://prim.iledefrance-mobilites.fr> et générer un jeton API ;
 2. le coller via le bouton « Clé API » (stocké dans `~/.config/fr.ipssi.metrolive/config.json`),
@@ -100,8 +100,6 @@ plusieurs points :
   qu'elle vient de quitter et le prochain qu'elle dessert. Quand seuls les arrêts à venir sont connus,
   la gare précédente est déduite de la mission qui correspond le mieux. Les courses et arrêts
   supprimés (`Cancellation`, `cancelled`) sont ignorés (`from_vehicles` dans `positions.rs`) ;
-- **simulation** : environ un train toutes les 3 min par sens sur le tronc commun, réparti entre les
-  missions selon leur nombre de courses ;
 - **correspondances** : en plus des gares de même nom, celles de `transfers.txt` à moins de 10 min
   et 500 m à pied (Châtelet ↔ Châtelet - Les Halles, Gare du Nord ↔ Magenta, Opéra ↔ Auber…) ;
 - **itinéraire** : un tronçon qu'aucune mission ne fait d'un bout à l'autre est coupé (« Changement de
@@ -176,7 +174,8 @@ Bouton « Itinéraire » en haut à droite, ou « Partir d'ici / Y aller » dans
 src-tauri/src/
   lib.rs        commandes Tauri (get_trains, get_departures, set_api_key…), cache 20 s par ligne
   prim.rs       client HTTP PRIM + parsing SIRI Lite
-  positions.rs  estimation des positions + simulation (mode démo)
+  positions.rs  estimation des positions à partir du temps réel
+  archive.rs    envoi du temps réel reçu à l'API de données (Cassandra), si la stack tourne
   topology.rs   topologie embarquée (include_str! de metro.json)
   traffic.rs    info trafic (perturbations, travaux)
 src/
@@ -196,10 +195,9 @@ Chaque service PRIM est limité à **1 000 requêtes par jour** par jeton (en-t�
 donc impossible. Par défaut :
 
 - seule la ligne choisie est en temps réel (1 requête toutes les 2 minutes, environ 720 par jour) ;
-- les autres lignes affichées sont **simulées** (temps de parcours du GTFS, un train toutes les
-  4 minutes environ), et l'interface le dit ;
-- en cas de quota épuisé (429), l'app n'appelle plus PRIM jusqu'à la remise à zéro et passe en
-  simulation ;
+- les autres lignes affichées sont placées d'après les **horaires prévus** du GTFS, et l'interface le dit ;
+- en cas de quota épuisé (429), l'app n'appelle plus PRIM jusqu'à la remise à zéro et se rabat sur
+  les horaires prévus ;
 - le quota restant s'affiche dans les réglages. « Tout le réseau en temps réel » reste disponible,
   mais épuise le quota en une heure environ.
 

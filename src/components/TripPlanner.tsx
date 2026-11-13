@@ -605,7 +605,7 @@ function LegView({
             ) : (
               <span>
                 Prochain train dans <b>{Math.floor(((next.expectedMs ?? now) - now) / 60000)} min</b>
-                {next.status === "démo" && <span className="text-ink-soft"> (simulé)</span>}
+                {next.status === "prévu" && <span className="text-ink-soft"> (horaire prévu)</span>}
               </span>
             )}
           </p>

@@ -153,6 +153,8 @@ for lid in LIGNES:
 
 data = {
     "generatedFrom": "IDFM GTFS",
+    # période couverte par le GTFS : en dehors, les horaires affichés ne sont qu'un jour type
+    "validite": {"debut": min(actifs).isoformat(), "fin": max(actifs).isoformat()},
     "gabarits": lignes_out,
     # courses à plat, triées par heure de départ : [départ en secondes depuis minuit, gabarit, départ, gabarit…]
     "jours": {nom: {"date": choisis[nom].isoformat(),

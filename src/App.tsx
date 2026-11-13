@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Journee, journeeEnCours, maintenant, trainsPrevus } from "@/lib/journee";
 import { api, Settings, clock, disruptedStations, worstActive } from "@/lib/api";
 import { useIsMobile, useNow, useTraffic, useTrains } from "@/lib/hooks";
 import { LINES, isRer, lineById, lineTitle } from "@/lib/metro";
@@ -179,7 +180,7 @@ export default function App() {
   const liveLine = route ? route.legs[0].lineId : focused;
 
   // Quota PRIM : 1 000 requêtes par jour. Par défaut, seule la ligne choisie
-  // est en temps réel ; les autres lignes affichées sont simulées.
+  // est en temps réel ; les autres lignes affichées suivent les horaires prévus.
   const shownIds = useMemo(() => {
     const ids = visibleLines.map((l) => l.id);
     route?.legs.forEach((l) => !ids.includes(l.lineId) && ids.push(l.lineId));
@@ -187,7 +188,22 @@ export default function App() {
   }, [visibleLines, route]);
   const liveIds = useMemo(() => (liveAll ? shownIds : liveLine ? [liveLine] : []), [liveAll, liveLine, shownIds]);
   const { data, error, loading } = useTrains(shownIds, liveIds, refresh, reload);
-  const trains = data?.trains ?? [];
+  // horaires du jour de service en cours, rechargés quand la journée change
+  const jour = maintenant(now).date;
+  const [prevus, setPrevus] = useState<Journee | null>(null);
+  useEffect(() => {
+    let vivant = true;
+    journeeEnCours().then((j) => vivant && setPrevus(j)).catch(() => {});
+    return () => {
+      vivant = false;
+    };
+  }, [jour]);
+  // temps réel de PRIM pour les lignes qui en ont, horaires prévus pour toutes les autres
+  const trains = useMemo(() => {
+    const reel = data?.trains ?? [];
+    const sansReel = new Set(shownIds.filter((id) => !data?.liveLines.includes(id)));
+    return prevus && sansReel.size ? [...reel, ...trainsPrevus(prevus, now, sansReel)] : reel;
+  }, [data, prevus, now, shownIds]);
   const perturbed = visibleLines.filter((l) => worstActive(trafficLines[l.id]));
 
   const counts = useMemo(() => {
@@ -204,17 +220,17 @@ export default function App() {
   const live = (id: string) => data?.liveLines.includes(id) ?? false;
   const shownTrains = liveLine ? trains.filter((t) => t.lineId === liveLine) : trains;
 
-  // Message d'état : toujours dire si les positions sont réelles ou simulées
+  // Message d'état : toujours dire si les positions sont réelles ou tirées des horaires prévus
   let statusText: string;
   if (!data) statusText = "Chargement…";
   else if (visibleLines.length === 0) statusText = "Aucune ligne affichée";
-  else if (data.demo) statusText = "Trains simulés, sans clé API";
-  else if (blockedUntil) statusText = `Trains simulés : quota API épuisé jusqu'à ${clock(blockedUntil)}`;
+  else if (data.demo) statusText = "Horaires prévus, pas de temps réel sans clé API";
+  else if (blockedUntil) statusText = `Horaires prévus : quota API épuisé jusqu'à ${clock(blockedUntil)}`;
   else if (liveLine && live(liveLine))
     statusText = `${shownTrains.length} trains en direct${route ? ` sur le ${lineTitle(lineById(liveLine))}` : ""}${age !== null && age > 5 ? `, il y a ${age} s` : ""}`;
-  else if (liveLine) statusText = `${shownTrains.length} trains simulés${route ? ` sur le ${lineTitle(lineById(liveLine))}` : ""}`;
+  else if (liveLine) statusText = `${shownTrains.length} trains d'après les horaires prévus${route ? ` sur le ${lineTitle(lineById(liveLine))}` : ""}`;
   else if (data.liveLines.length === shownIds.length) statusText = `${trains.length} trains en direct`;
-  else statusText = "Trains simulés. Choisissez une ligne pour le temps réel";
+  else statusText = "Horaires prévus. Choisissez une ligne pour le temps réel";
   const isLive = !!data && !data.demo && !blockedUntil && (liveLine ? live(liveLine) : data.liveLines.length > 0);
 
   const focus = (id: string | null) => {

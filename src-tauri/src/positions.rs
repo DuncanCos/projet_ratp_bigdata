@@ -39,8 +39,6 @@ pub struct Train {
     pub next_stops: Vec<NextStop>,
 }
 
-const DWELL_MS: i64 = 25_000;
-
 /// Un passage annoncé à une station.
 struct Pred<'a> {
     station: usize,
@@ -291,87 +289,4 @@ fn from_vehicles(line: &Line, journeys: &[Journey], now: i64) -> Vec<Train> {
     }
     unique_ids(&mut trains);
     trains
-}
-
-/// Mode démo (sans clé API) : trains simulés à intervalle régulier sur chaque
-/// pattern, à partir des temps de parcours théoriques.
-pub fn simulate(line: &Line, now: i64) -> Vec<Train> {
-    let mut trains = Vec::new();
-    if line.is_rer() {
-        // RER : environ un train toutes les 3 min par sens sur le tronc commun,
-        // réparti entre les missions selon leur nombre de courses dans le GTFS
-        let total: u32 = line.services.iter().map(|s| s.trips).sum();
-        for (pi, p) in line.services.iter().enumerate() {
-            let share = p.trips as f64 / total.max(1) as f64;
-            if share < 0.02 {
-                continue; // missions rares : non simulées
-            }
-            let headway = (3.0 * 60_000.0 / (share * 2.0)) as i64;
-            simulate_pattern(line, pi, p, headway, RER_DWELL_MS, now, &mut trains);
-        }
-        return trains;
-    }
-    for (pi, p) in line.patterns.iter().enumerate() {
-        // une branche ne reçoit qu'une partie des trains du tronc commun
-        let same_dir = line.patterns.iter().filter(|o| o.direction == p.direction).count() as i64;
-        let headway: i64 = 4 * 60_000 * same_dir.max(1);
-        simulate_pattern(line, pi, p, headway, DWELL_MS, now, &mut trains);
-    }
-    trains
-}
-
-const RER_DWELL_MS: i64 = 40_000;
-
-/// Trains d'une mission, partis du terminus toutes les `headway` ms.
-fn simulate_pattern(
-    line: &Line,
-    pi: usize,
-    p: &crate::topology::Pattern,
-    headway: i64,
-    dwell: i64,
-    now: i64,
-    trains: &mut Vec<Train>,
-) {
-    {
-        if p.stations.len() < 2 {
-            return;
-        }
-        // temps cumulés : pour chaque segment k, [départ, arrivée]
-        let mut t = 0i64;
-        let mut segs = Vec::new();
-        for w in p.stations.windows(2) {
-            let travel = line.travel(w[0], w[1]) as i64 * 1000;
-            segs.push((w[0], w[1], t + dwell, t + dwell + travel));
-            t += dwell + travel;
-        }
-        let cycle = t;
-        let phase = (pi as i64) * 37_000;
-        let mut k = 0;
-        while k * headway < cycle {
-            // instant de départ du terminus de ce train dans le cycle courant
-            let elapsed = (now + phase - k * headway).rem_euclid(cycle.max(1));
-            let start = now - elapsed;
-            if let Some(&(a, b, d, e)) = segs.iter().find(|&&(_, _, _, e)| elapsed < e) {
-                let at_station = elapsed < d;
-                let next_stops = segs
-                    .iter()
-                    .filter(|s| s.3 > elapsed)
-                    .take(4)
-                    .map(|s| NextStop { station: s.1, at_ms: start + s.3 })
-                    .collect();
-                trains.push(Train {
-                    id: format!("demo-{}-{pi}-{k}", line.id),
-                    line_id: line.id.clone(),
-                    from: a,
-                    to: if at_station { a } else { b },
-                    depart_at_ms: if at_station { start + d - dwell } else { start + d },
-                    arrive_at_ms: if at_station { start + d } else { start + e },
-                    at_station,
-                    destination: p.headsign.clone(),
-                    next_stops,
-                });
-            }
-            k += 1;
-        }
-    }
 }

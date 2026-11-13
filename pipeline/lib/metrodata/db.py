@@ -66,6 +66,16 @@ SCHEMA = [
     # … et l'historique d'une ligne (croisement avec les validations)
     f"""CREATE TABLE IF NOT EXISTS perturbations_ligne ({_PERTURBATION}
         PRIMARY KEY ((ligne), jour, id)) WITH CLUSTERING ORDER BY (jour DESC, id ASC)""",
+    # temps réel PRIM envoyé par l'appli de bureau : positions réelles d'une ligne un jour donné (rejeu)…
+    """CREATE TABLE IF NOT EXISTS positions_temps_reel (
+        ligne text, jour date, releve timestamp, train text, de int, vers int,
+        depart timestamp, arrivee timestamp, a_quai boolean, destination text,
+        PRIMARY KEY ((ligne, jour), releve, train))""",
+    # … et passages à une station : heure attendue contre heure prévue (retards)
+    """CREATE TABLE IF NOT EXISTS passages_temps_reel (
+        ligne text, jour date, station int, releve timestamp, attendu timestamp, destination text,
+        direction text, prevu timestamp, quai text, a_quai boolean, statut text,
+        PRIMARY KEY ((ligne, jour), station, releve, attendu, destination))""",
     # journal des chargements, pour la page « pipeline » et la qualité des données
     """CREATE TABLE IF NOT EXISTS chargements (
         source text, periode text, charge_le timestamp, lignes_brutes int, lignes_rejetees int,

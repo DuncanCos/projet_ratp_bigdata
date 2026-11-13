@@ -2,10 +2,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { CircleMarker, MapContainer, Polyline, TileLayer, Tooltip, useMap, useMapEvents } from "react-leaflet";
 import { ChartNoAxesColumn, Check, Map as MapIcon, Pause, Play, Radio, TriangleAlert } from "lucide-react";
 import { Disruption } from "@/lib/api";
-import { decale, get, iso } from "@/lib/dataApi";
+import { dateLongue, get } from "@/lib/dataApi";
 import { dataHref, hashParams } from "@/lib/frequentation";
 import { useIsMobile } from "@/lib/hooks";
-import { Journee, NOM_TYPE, chargerJournee, heure, typeDuJour } from "@/lib/journee";
+import { Journee, NOM_TYPE, chargerJournee, heure, maintenant, typeDuJour } from "@/lib/journee";
 import { LINES, Line, geometry, lineById } from "@/lib/metro";
 import { BOUNDS, DirectionLegend, FitTo, ZoomControls } from "@/components/MapView";
 import { LinePicker } from "@/components/LinePicker";
@@ -29,18 +29,12 @@ interface Perturbation {
 }
 
 /** secondes de journée par seconde réelle */
-const VITESSES: [number, string][] = [[1, "1 seconde"], [60, "1 minute"], [300, "5 minutes"], [900, "15 minutes"], [3600, "1 heure"]];
+const VITESSES: [number, string][] = [[60, "1 minute"], [300, "5 minutes"], [900, "15 minutes"], [3600, "1 heure"]];
 const INK = "#1d2733";
 const MUTED = "#aeb7b3";
-const fJour = new Intl.DateTimeFormat("fr-FR", { weekday: "long", day: "numeric", month: "long" });
+const fJour = new Intl.DateTimeFormat("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
 const nomJour = (date: string) => fJour.format(new Date(`${date}T12:00:00`));
 
-/** Jour de service et seconde en cours : avant 3 h 30, on est encore dans la journée de la veille. */
-function maintenant() {
-  const n = new Date();
-  const s = n.getHours() * 3600 + n.getMinutes() * 60 + n.getSeconds();
-  return s < 3.5 * 3600 ? { date: decale(iso(n), -1), t: s + 86400 } : { date: iso(n), t: s };
-}
 
 function useZoom() {
   const map = useMap();
@@ -101,7 +95,7 @@ function Lignes({ focused }: { focused: Line | null }) {
 }
 
 /** Frise de la journée : trains en circulation minute par minute, curseur à déplacer. */
-function Frise({ journee, curseur, onAller }: { journee: Journee; curseur: React.RefObject<HTMLDivElement | null>; onAller: (t: number) => void }) {
+function Frise({ journee, curseur, onAller, present }: { journee: Journee; curseur: React.RefObject<HTMLDivElement | null>; onAller: (t: number) => void; present: number | null }) {
   const { debut, fin, charge } = journee;
   const aire = useMemo(() => {
     const max = Math.max(1, ...charge);
@@ -136,6 +130,11 @@ function Frise({ journee, curseur, onAller }: { journee: Journee; curseur: React
         <svg viewBox="0 0 1000 40" preserveAspectRatio="none" className="absolute inset-0 h-full w-full" aria-hidden>
           <path d={aire} fill="#dfe4e1" />
         </svg>
+        {present !== null && present > debut && present < fin && (
+          <span className="absolute inset-y-0 border-l border-dashed border-ink" style={{ left: `${((present - debut) / (fin - debut)) * 100}%` }}>
+            <span className="absolute left-1 top-0 whitespace-nowrap text-[10px] font-semibold leading-none text-ink">maintenant</span>
+          </span>
+        )}
         {/* partie déjà jouée, découverte par le curseur */}
         <div ref={curseur} className="absolute inset-0 [--x:0%]">
           <svg viewBox="0 0 1000 40" preserveAspectRatio="none" className="absolute inset-0 h-full w-full" style={{ clipPath: "inset(0 calc(100% - var(--x)) 0 0)" }} aria-hidden>
@@ -172,10 +171,15 @@ export default function DayReplay({ carte }: { carte: boolean }) {
   });
   const [lecture, setLecture] = useState(true);
   const [vitesse, setVitesse] = useState(300);
+  // direct : aujourd'hui, l'horloge suit l'heure réelle ; on en sort dès qu'on touche à l'heure ou à la vitesse
+  const [enDirect, setEnDirect] = useState(false);
+  const aujourdhui = date === maintenant().date;
   // ce que l'interface affiche, rafraîchi quatre fois par seconde (la carte, elle, à chaque image)
   const [vu, setVu] = useState({ minute: 0, total: 0, parLigne: {} as Record<string, number>, sens: [0, 0] as [number, number] });
 
-  const horloge = useRef({ t: 0, lecture, vitesse });
+  const horloge = useRef({ t: 0, lecture, vitesse, direct: enDirect, aujourdhui });
+  horloge.current.direct = enDirect && aujourdhui;
+  horloge.current.aujourdhui = aujourdhui;
   // heure à laquelle se placer quand la journée choisie est prête ; sinon on repart du début
   const cible = useRef<number | null>(null);
   horloge.current.lecture = lecture;
@@ -201,22 +205,40 @@ export default function DayReplay({ carte }: { carte: boolean }) {
 
   // chaque journée choisie repart de son début (ou de l'heure qu'il est, pour le direct)
   useEffect(() => {
-    if (!journee) return;
+    if (!journee || journee.type !== type) return; // les horaires de ce jour type arrivent
     horloge.current.t = Math.min(journee.fin, Math.max(journee.debut, cible.current ?? journee.debut));
     cible.current = null;
-  }, [date, journee]);
-  const aller = (t: number) => {
+  }, [date, journee, type]);
+  const placer = (t: number) => {
     const j = jRef.current;
     if (j) horloge.current.t = Math.min(j.fin, Math.max(j.debut, t));
   };
+  /** l'utilisateur choisit une heure : on quitte le direct */
+  const aller = (t: number) => {
+    setEnDirect(false);
+    placer(t);
+  };
   const direct = () => {
     const m = maintenant();
-    if (m.date === date) aller(m.t);
+    if (m.date === date) placer(m.t);
     else cible.current = m.t;
     setDate(m.date);
-    setVitesse(1);
+    setEnDirect(true);
     setLecture(true);
   };
+  const changerDate = (d: string) => {
+    setEnDirect(false);
+    setDate(d);
+  };
+  const bascule = () => {
+    const j = jRef.current;
+    // en bout de journée, relancer repart du début
+    if (!lecture && j && horloge.current.t >= j.fin) horloge.current.t = j.debut;
+    if (lecture) setEnDirect(false);
+    setLecture(!lecture);
+  };
+  const basculeRef = useRef(bascule);
+  basculeRef.current = bascule;
 
   // une seule boucle : l'heure avance, la carte et le curseur suivent
   useEffect(() => {
@@ -229,9 +251,20 @@ export default function DayReplay({ carte }: { carte: boolean }) {
       const dt = Math.min(0.1, (now - avant) / 1000);
       avant = now;
       if (j) {
-        if (h.lecture) {
+        if (h.direct) h.t = Math.min(j.fin, Math.max(j.debut, maintenant().t));
+        else if (h.lecture) {
+          const avantT = h.t;
           h.t += dt * h.vitesse;
-          if (h.t > j.fin) h.t = j.debut; // la journée recommence
+          // aujourd'hui, l'accéléré s'arrête sur le présent et passe en direct : la suite n'a pas eu lieu
+          const present = h.aujourdhui ? maintenant().t : Infinity;
+          if (avantT < present && h.t >= present) {
+            h.t = present;
+            setEnDirect(true);
+          } else if (h.t >= j.fin) {
+            // fin de journée : on s'arrête, sans reboucler
+            h.t = j.fin;
+            setLecture(false);
+          }
         }
         dessiner.current?.(h.t);
         if (heureEl.current) heureEl.current.textContent = heure(h.t);
@@ -253,7 +286,7 @@ export default function DayReplay({ carte }: { carte: boolean }) {
   useEffect(() => {
     const touche = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLButtonElement) return;
-      if (e.key === " ") setLecture((l) => !l);
+      if (e.key === " ") basculeRef.current();
       else if (e.key === "ArrowRight") aller(horloge.current.t + (e.shiftKey ? 1800 : 300));
       else if (e.key === "ArrowLeft") aller(horloge.current.t - (e.shiftKey ? 1800 : 300));
       else return;
@@ -295,6 +328,7 @@ export default function DayReplay({ carte }: { carte: boolean }) {
   const perturbees = LINES.filter((l) => trafic[l.id]);
   const autres = new Set(enCours.filter((p) => !LINES.some((l) => l.id === p.ligne)).map((p) => p.ligne)).size;
 
+  const horsGtfs = !!journee && (date < journee.validite.debut || date > journee.validite.fin);
   const focusLine = focused ? lineById(focused) : null;
   const bouton = "h-9 rounded-full px-3 text-sm font-semibold tabular-nums";
 
@@ -341,12 +375,20 @@ export default function DayReplay({ carte }: { carte: boolean }) {
                 </p>
                 {/* ce qu'on a vraiment pour ce jour-là */}
                 <ul className="mt-1.5 grid gap-0.5 text-xs">
-                  <li className="flex items-start gap-1.5">
-                    <Check className="mt-px size-3.5 shrink-0 text-emerald-600" />
-                    <span>
-                      Trains : horaires prévus d'un <b className="font-semibold">{NOM_TYPE[type]}</b> (GTFS), pas les positions réelles
-                    </span>
-                  </li>
+                  {journee && (
+                    <li className="flex items-start gap-1.5">
+                      {horsGtfs ? <TriangleAlert className="mt-px size-3.5 shrink-0 text-amber-500" /> : <Check className="mt-px size-3.5 shrink-0 text-emerald-600" />}
+                      <span>
+                        {horsGtfs && (
+                          <>
+                            <b className="font-semibold">Pas d'horaires pour cette date</b> : le GTFS ne couvre que du {dateLongue(journee.validite.debut)} au{" "}
+                            {dateLongue(journee.validite.fin)}.{" "}
+                          </>
+                        )}
+                        Trains : horaires prévus d'un <b className="font-semibold">{NOM_TYPE[type]}</b> type ({dateLongue(journee.date)}), pas les positions réelles
+                      </span>
+                    </li>
+                  )}
                   <li className="flex items-start gap-1.5">
                     {nbArchive > 0 ? <Check className="mt-px size-3.5 shrink-0 text-emerald-600" /> : <TriangleAlert className="mt-px size-3.5 shrink-0 text-amber-500" />}
                     <span>
@@ -400,7 +442,7 @@ export default function DayReplay({ carte }: { carte: boolean }) {
 
         <footer className="shrink-0 border-t border-border bg-white px-3 pb-2 pt-2.5 md:px-4">
           <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-2">
-            <Button className="size-10 rounded-full p-0" onClick={() => setLecture(!lecture)} aria-label={lecture ? "Mettre en pause" : "Lancer"}>
+            <Button className="size-10 rounded-full p-0" onClick={bascule} aria-label={lecture ? "Mettre en pause" : "Lancer"}>
               {lecture ? <Pause className="size-5" /> : <Play className="size-5" />}
             </Button>
             <div className="leading-none">
@@ -413,18 +455,27 @@ export default function DayReplay({ carte }: { carte: boolean }) {
               {VITESSES.map(([v, duree]) => (
                 <button
                   key={v}
-                  onClick={() => setVitesse(v)}
-                  aria-pressed={vitesse === v}
+                  onClick={() => {
+                    setEnDirect(false);
+                    setVitesse(v);
+                  }}
+                  aria-pressed={!enDirect && vitesse === v}
                   title={`1 seconde = ${duree}`}
-                  className={`${bouton} ${vitesse === v ? "bg-ink text-white" : "bg-tile text-ink-soft hover:bg-tile-deep"}`}
+                  className={`${bouton} ${!enDirect && vitesse === v ? "bg-ink text-white" : "bg-tile text-ink-soft hover:bg-tile-deep"}`}
                 >
                   ×{v}
                 </button>
               ))}
             </div>
-            <span className="hidden text-xs text-ink-soft md:inline">1 seconde = {VITESSES.find(([v]) => v === vitesse)?.[1]}</span>
-            <Button variant="outline" className="ml-auto h-9 gap-2 rounded-full bg-white px-3" onClick={direct} title="Aujourd'hui, à l'heure qu'il est, en temps réel">
-              <Radio className="size-4 text-signal" />
+            <span className="hidden text-xs text-ink-soft md:inline">{enDirect ? "à l'heure réelle" : `1 seconde = ${VITESSES.find(([v]) => v === vitesse)?.[1]}`}</span>
+            <Button
+              variant={enDirect ? "default" : "outline"}
+              className={`ml-auto h-9 gap-2 rounded-full px-3 ${enDirect ? "" : "bg-white"}`}
+              aria-pressed={enDirect}
+              onClick={direct}
+              title="Aujourd'hui, à l'heure qu'il est (horaires prévus)"
+            >
+              <Radio className={`size-4 ${enDirect ? "animate-pulse" : "text-signal"}`} />
               Direct
             </Button>
             <label className="flex items-center gap-2 text-xs text-ink-soft">
@@ -433,13 +484,13 @@ export default function DayReplay({ carte }: { carte: boolean }) {
                 type="date"
                 value={date}
                 max={maintenant().date}
-                onChange={(e) => e.target.value && setDate(e.target.value)}
+                onChange={(e) => e.target.value && changerDate(e.target.value)}
                 aria-label="Jour à rejouer"
                 className="h-9 rounded-md border border-input bg-white px-2 text-sm text-ink"
               />
             </label>
           </div>
-          {journee && <Frise journee={journee} curseur={curseur} onAller={aller} />}
+          {journee && <Frise journee={journee} curseur={curseur} onAller={aller} present={aujourdhui ? maintenant().t : null} />}
         </footer>
       </div>
     </div>
