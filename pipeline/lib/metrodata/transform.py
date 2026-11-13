@@ -6,9 +6,12 @@ Ce que les fichiers publiés font varier selon les années :
   nom des colonnes (ID_REFA_LDA, lda, ida, ID_ZDC ; JOUR ou Date), nombres (« 1 000 », « 71379.0 », « Moins de 5 »),
   libellés des catégories de titre.
 """
+import html
 import io
 import re
+from datetime import datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
@@ -205,3 +208,74 @@ def contexte(meteo_archive: dict, meteo_prevision: dict, feries: dict, vacances:
         if b > a:
             df.loc[(df["jour"] >= a) & (df["jour"] < b), "vacances"] = v["description"]
     return df.reset_index(drop=True)
+
+
+# ---------- perturbations (PRIM) ----------
+
+PARIS = ZoneInfo("Europe/Paris")
+# balises en minuscules seulement : « <RER> », « <METRO> » dans les messages sont du texte (pictogrammes)
+_BALISE = re.compile(r"<(/?)([a-z][a-z0-9]*)\b[^>]*>")
+_BLOCS = {"p", "br", "li", "ul", "div"}
+
+
+def texte(message: str) -> str:
+    """HTML des messages -> texte brut : balises retirées, entités décodées, sans lignes vides."""
+    s = _BALISE.sub(lambda m: "\n" if m.group(2) in _BLOCS else "", message or "")
+    s = html.unescape(s).replace("\xa0", " ")
+    return "\n".join(l.strip() for l in s.splitlines() if l.strip())
+
+
+def _paris(s: str | None) -> datetime | None:
+    """« 20261112T063700 » en heure de Paris -> datetime UTC."""
+    if not s:
+        return None
+    return datetime.strptime(s, "%Y%m%dT%H%M%S").replace(tzinfo=PARIS).astimezone(timezone.utc)
+
+
+def _fin_id(s: str) -> str:
+    return s.rsplit(":", 1)[-1]
+
+
+def _zdc_prim(oid: str | None) -> int | None:
+    """« stop_area:IDFM:488087 » -> 488087"""
+    n = _fin_id(oid or "")
+    return int(n) if n.isdigit() else None
+
+
+def perturbations(brut: dict, instant: datetime) -> list[dict]:
+    """Une ligne par couple (ligne ferrée, perturbation en cours à `instant`, datetime « aware »)."""
+    par_id = {d["id"]: d for d in brut.get("disruptions", [])}
+    out = []
+    for l in brut.get("lines", []):
+        if l.get("mode") not in c.MODES_FERRES:
+            continue
+        ligne = _fin_id(l["id"])
+        impacts: dict[str, list] = {}  # id -> [toute la ligne, stations]
+        for o in l.get("impactedObjects", []):
+            for did in o.get("disruptionIds", []):
+                e = impacts.setdefault(did, [False, set()])
+                if o.get("type") == "line":
+                    e[0] = True
+                elif o.get("type") == "stop_area" and (z := _zdc_prim(o.get("id"))) is not None:
+                    e[1].add(z)  # les stop_point sont des quais : ignorés
+        for did, (toute, stations) in impacts.items():
+            d = par_id.get(did)
+            if d is None:
+                continue
+            periodes = ((_paris(p.get("begin")), _paris(p.get("end"))) for p in d.get("applicationPeriods", []))
+            en_cours = next(((a, b) for a, b in periodes if a and b and a <= instant < b), None)
+            if en_cours is None:
+                continue
+            for sec in d.get("impactedSections", []):
+                if _fin_id(sec.get("lineId", "")) != ligne:
+                    continue
+                for bout in (sec.get("from") or {}, sec.get("to") or {}):
+                    if bout.get("type") == "stop_area" and (z := _zdc_prim(bout.get("id"))) is not None:
+                        stations.add(z)
+            out.append({
+                "ligne": ligne, "nom_ligne": l.get("shortName") or l.get("name"), "mode": l.get("mode"), "id": did,
+                "titre": d.get("title"), "message": texte(d.get("message")), "message_court": d.get("shortMessage"),
+                "gravite": d.get("severity"), "cause": d.get("cause"), "debut": en_cours[0], "fin": en_cours[1],
+                "maj": _paris(d.get("lastUpdate")), "toute_la_ligne": toute, "stations": stations,
+            })
+    return out

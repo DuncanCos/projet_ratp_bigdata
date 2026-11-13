@@ -19,6 +19,12 @@ PROFIL_TRIMESTRE = "validations-reseau-ferre-profils-horaires-par-jour-type-{}"
 GARES = "emplacement-des-gares-idf-data-generalisee"
 LIGNES = "referentiel-des-lignes"
 
+# Info trafic en temps réel (PRIM, clé gratuite) : 1 000 appels par jour, partagés avec l'appli de bureau.
+PRIM_PERTURBATIONS = "https://prim.iledefrance-mobilites.fr/marketplace/disruptions_bulk/disruptions/v2"
+PRIM_API_KEY = os.environ.get("PRIM_API_KEY", "")
+MODES_FERRES = {"Metro", "RapidTransit", "LocalTrain", "Tramway", "SuspendedCableCar"}  # tout sauf Bus
+JOURS_BRUT_PERTURBATIONS = 3  # relevés bruts gardés sur disque
+
 # Paris, pour la météo (Open-Meteo)
 LAT, LON = 48.8566, 2.3522
 

@@ -9,6 +9,14 @@ from cassandra.query import dict_factory
 
 from .config import CASSANDRA_HOSTS, KEYSPACE
 
+_PERTURBATION = """
+        jour date, ligne text, id text, nom_ligne text, mode text, titre text, message text, message_court text,
+        gravite text, cause text, debut timestamp, fin timestamp, maj timestamp, toute_la_ligne boolean,
+        stations set<int>, premiere_vue timestamp, derniere_vue timestamp, nb_releves int,"""
+COLONNES_PERTURBATION = ["jour", "ligne", "id", "nom_ligne", "mode", "titre", "message", "message_court", "gravite",
+                         "cause", "debut", "fin", "maj", "toute_la_ligne", "stations", "premiere_vue", "derniere_vue",
+                         "nb_releves"]
+
 # Une table par besoin de lecture de l'API (modélisation Cassandra « par requête »).
 SCHEMA = [
     f"CREATE KEYSPACE IF NOT EXISTS {KEYSPACE} WITH replication = {{'class': 'SimpleStrategy', 'replication_factor': 1}}",
@@ -52,6 +60,12 @@ SCHEMA = [
         test_debut date, test_fin date, n_train int, n_test int,
         mae double, wape double, r2 double, mae_reference double, wape_reference double,
         importances map<text, double>)""",
+    # perturbations relevées sur PRIM : tout le réseau un jour donné (rejeu d'une journée)…
+    f"""CREATE TABLE IF NOT EXISTS perturbations_jour ({_PERTURBATION}
+        PRIMARY KEY ((jour), ligne, id))""",
+    # … et l'historique d'une ligne (croisement avec les validations)
+    f"""CREATE TABLE IF NOT EXISTS perturbations_ligne ({_PERTURBATION}
+        PRIMARY KEY ((ligne), jour, id)) WITH CLUSTERING ORDER BY (jour DESC, id ASC)""",
     # journal des chargements, pour la page « pipeline » et la qualité des données
     """CREATE TABLE IF NOT EXISTS chargements (
         source text, periode text, charge_le timestamp, lignes_brutes int, lignes_rejetees int,

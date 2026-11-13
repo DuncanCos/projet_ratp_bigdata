@@ -20,6 +20,8 @@ x-airflow: &airflow
     PYTHONPATH: /opt/lib
     METRODATA_DIR: /opt/data
     CASSANDRA_HOSTS: cassandra
+    # info trafic temps réel (DAG perturbations_prim) : clé gratuite, dans pipeline/.env (non versionné)
+    PRIM_API_KEY: ${PRIM_API_KEY:-}
   volumes:
     - ./dags:/opt/airflow/dags:z
     - ./lib:/opt/lib:z

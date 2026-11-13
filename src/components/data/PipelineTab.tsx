@@ -3,8 +3,8 @@ import { AIRFLOW_URL, Chargement, DATA_API, Meta, dateCourte, dateLongue, entier
 import { Card, Empty, Stat, useApi } from "./kit";
 
 const ETAPES: [string, string][] = [
-  ["Sources ouvertes", "Validations IDFM (archives 2015 à 2025, trimestres par API), gares et lignes, météo Open-Meteo, jours fériés, vacances scolaires"],
-  ["Airflow", "5 DAGs : extraction, nettoyage, chargement, agrégats, modèle. Ils s'enchaînent par « assets »"],
+  ["Sources ouvertes", "Validations IDFM (archives 2015 à 2025, trimestres par API), gares et lignes, météo Open-Meteo, jours fériés, vacances scolaires, info trafic PRIM"],
+  ["Airflow", "6 DAGs : extraction, nettoyage, chargement, agrégats, modèle, archive de l'info trafic. Ils s'enchaînent par « assets »"],
   ["Parquet", "Zone nettoyée : un fichier par période, mêmes colonnes quel que soit le format d'origine"],
   ["Cassandra", "Une table par besoin de lecture : par station, par ligne, réseau, classements, prédictions"],
   ["API et web app", "FastAPI en lecture seule, puis ce tableau de bord"],

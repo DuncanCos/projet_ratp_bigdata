@@ -5,7 +5,7 @@ import pandas as pd
 
 from . import config as c
 from . import db
-from .transform import CAT_COLS, all_validations
+from .transform import CAT_COLS, PARIS, all_validations
 
 
 def _d(ts):
@@ -50,6 +50,26 @@ def contexte(df: pd.DataFrame) -> int:
     return db.upsert("contexte_jour", ["annee", "jour", "tmax", "tmin", "pluie_mm", "ferie", "vacances", "prevision"],
                      ((r.jour.year, _d(r.jour), nn(r.tmax), nn(r.tmin), nn(r.pluie_mm), nn(r.ferie), nn(r.vacances),
                        bool(r.prevision)) for r in df.itertuples()))
+
+
+def perturbations(lignes: list[dict], instant: datetime) -> dict:
+    """Archive un relevé PRIM : une perturbation déjà vue ce jour-là garde sa première apparition
+    et compte un relevé de plus. Lecture puis écriture : le DAG ne tourne jamais en double."""
+    jour = instant.astimezone(PARIS).date()
+    deja = {(r["ligne"], r["id"]): r for r in db.query(
+        "SELECT ligne, id, premiere_vue, nb_releves FROM perturbations_jour WHERE jour = %s", (jour,))}
+    rows = []
+    for p in lignes:
+        avant = deja.get((p["ligne"], p["id"]))
+        premiere = avant["premiere_vue"].replace(tzinfo=timezone.utc) if avant and avant["premiere_vue"] else instant
+        rows.append((jour, p["ligne"], p["id"], p["nom_ligne"], p["mode"], p["titre"], p["message"], p["message_court"],
+                     p["gravite"], p["cause"], p["debut"], p["fin"], p["maj"], p["toute_la_ligne"], set(p["stations"]),
+                     min(premiere, instant), instant, (avant["nb_releves"] or 0) + 1 if avant else 1))
+    for table in ("perturbations_jour", "perturbations_ligne"):
+        db.upsert(table, db.COLONNES_PERTURBATION, rows)
+    distinctes = {i for _, i in deja} | {p["id"] for p in lignes}
+    return {"jour": jour.isoformat(), "en_cours": len(rows), "nouvelles": sum(1 for p in lignes if (p["ligne"], p["id"]) not in deja),
+            "perturbations_du_jour": len(distinctes)}
 
 
 def agregats() -> dict:

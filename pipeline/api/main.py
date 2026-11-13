@@ -2,7 +2,8 @@
 import re
 import time
 from collections import defaultdict
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,6 +16,7 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET"])
 app.mount("/figures", StaticFiles(directory=config.FIGURES), name="figures")
 
 _cache: dict[str, tuple[float, object]] = {}
+PARIS = ZoneInfo("Europe/Paris")
 
 
 def cached(key: str, ttl: int, fn):
@@ -222,6 +224,36 @@ def pipeline():
     for r in rows:
         r["jour_min"], r["jour_max"] = d(r["jour_min"]), d(r["jour_max"])
     return sorted(rows, key=lambda r: (r["jour_min"], r["source"]))
+
+
+def _utc(v: datetime | None) -> str | None:
+    """Horodatage Cassandra (UTC sans fuseau) -> ISO 8601 UTC."""
+    return v.replace(tzinfo=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ") if v else None
+
+
+@app.get("/api/perturbations")
+def perturbations(jour: date | None = None, ligne: str | None = None, debut: date | None = None, fin: date | None = None):
+    """Perturbations archivées par le DAG perturbations_prim : un jour (tout le réseau ou une ligne),
+    ou l'historique d'une ligne entre `debut` et `fin`. `fin_observee` : une perturbation disparue du flux
+    avant sa fin annoncée est considérée terminée 10 minutes après le dernier relevé qui la montrait."""
+    def load():
+        if ligne and (debut or fin):
+            f = fin or datetime.now(PARIS).date()
+            rows = db.query("SELECT * FROM perturbations_ligne WHERE ligne = %s AND jour >= %s AND jour <= %s",
+                            (ligne, debut or f - timedelta(days=30), f))
+        else:
+            j = jour or datetime.now(PARIS).date()
+            rows = db.query("SELECT * FROM perturbations_jour WHERE jour = %s" + (" AND ligne = %s" if ligne else ""),
+                            (j, ligne) if ligne else (j,))
+        out = []
+        for r in rows:
+            vue = r["derniere_vue"] + timedelta(minutes=10) if r["derniere_vue"] else None
+            obs = min((x for x in (r["fin"], vue) if x), default=None)
+            out.append({**r, "jour": d(r["jour"]), "stations": sorted(r["stations"] or []),
+                        **{k: _utc(r[k]) for k in ("debut", "fin", "maj", "premiere_vue", "derniere_vue")},
+                        "fin_observee": _utc(obs)})
+        return sorted(out, key=lambda r: (-r["jour"].toordinal(), r["ligne"], r["debut"] or ""))
+    return cached(f"perturbations:{jour}:{ligne}:{debut}:{fin}", 60, load)
 
 
 @app.get("/api/sante")

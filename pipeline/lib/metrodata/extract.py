@@ -1,9 +1,12 @@
 """Extraction : téléchargement des sources ouvertes dans la zone brute (RAW), sans transformation."""
+import gzip
 import json
 import re
+import shutil
 import zipfile
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import requests
 
@@ -100,5 +103,48 @@ def download_contexte(debut: str = "2015-01-01") -> dict[str, str]:
     }
 
 
+# ---------- perturbations en temps réel (PRIM) ----------
+
+class CleAbsente(RuntimeError):
+    pass
+
+
+class QuotaEpuise(RuntimeError):
+    pass
+
+
+PARIS = ZoneInfo("Europe/Paris")
+
+
+def download_perturbations() -> dict:
+    """Relevé de l'info trafic de tout le réseau, gardé tel quel (gzip) dans RAW/perturbations/<jour>/<HHMM>.json.gz."""
+    if not c.PRIM_API_KEY:
+        raise CleAbsente("PRIM_API_KEY absente : clé gratuite sur prim.iledefrance-mobilites.fr, à mettre dans pipeline/.env")
+    instant = datetime.now(timezone.utc)
+    r = requests.get(c.PRIM_PERTURBATIONS, headers={**UA, "apikey": c.PRIM_API_KEY, "Accept": "application/json"},
+                     timeout=60)
+    if r.status_code == 429:
+        raise QuotaEpuise("quota PRIM du jour épuisé (1 000 appels, partagés avec l'appli de bureau)")
+    if r.status_code in (401, 403):
+        raise RuntimeError(f"clé PRIM refusée (HTTP {r.status_code}) : vérifier PRIM_API_KEY et l'abonnement à l'API")
+    r.raise_for_status()
+    local = instant.astimezone(PARIS)
+    base = c.RAW / "perturbations"
+    dest = base / local.date().isoformat() / f"{local:%H%M}.json.gz"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_suffix(".part")
+    tmp.write_bytes(gzip.compress(r.content))
+    tmp.replace(dest)
+    limite = (local.date() - timedelta(days=c.JOURS_BRUT_PERTURBATIONS)).isoformat()
+    for d in base.iterdir():
+        if d.is_dir() and d.name < limite:
+            shutil.rmtree(d)
+    return {"fichier": str(dest), "instant": instant.isoformat(),
+            "quota_restant": r.headers.get("x-ratelimit-remaining-day")}
+
+
 def read_json(path: str):
-    return json.loads(Path(path).read_text(encoding="utf-8"))
+    p = Path(path)
+    if p.suffix == ".gz":
+        return json.loads(gzip.decompress(p.read_bytes()))
+    return json.loads(p.read_text(encoding="utf-8"))

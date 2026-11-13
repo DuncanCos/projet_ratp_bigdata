@@ -5,7 +5,7 @@ Combien de voyageurs valident leur titre dans chaque gare et station d'Île-de-F
 Apache Airflow les collecte et les nettoie, Cassandra les stocke, une API les sert au tableau de bord React.
 
 ```
- sources ouvertes ──► Airflow (5 DAGs) ──► Parquet (zone nettoyée) ──► Cassandra ──► API FastAPI ──► web app React
+ sources ouvertes ──► Airflow (6 DAGs) ──► Parquet (zone nettoyée) ──► Cassandra ──► API FastAPI ──► web app React
                          │                                                 ▲
                          └── modèle scikit-learn : prédictions, métriques, figures matplotlib
 ```
@@ -40,8 +40,11 @@ de lignes lues, 3 millions de lignes station-jour écrites), puis l'entraînemen
 | Météo de Paris, observée et prévue | Open-Meteo (archive ERA5 et prévision) | JSON |
 | Jours fériés | calendrier.api.gouv.fr | JSON |
 | Vacances scolaires, zone C | data.education.gouv.fr | JSON |
+| Perturbations en cours (info trafic) | IDFM, API PRIM `disruptions_bulk/disruptions/v2` | JSON, relevé toutes les 10 minutes |
 
-Aucune clé d'API n'est nécessaire.
+Aucune clé d'API n'est nécessaire, sauf pour l'info trafic : clé PRIM gratuite (prim.iledefrance-mobilites.fr),
+à mettre dans `pipeline/.env` (`PRIM_API_KEY=...`, fichier non versionné). Sans clé, le DAG `perturbations_prim`
+saute ses relevés et le reste du pipeline fonctionne normalement.
 
 ## Les DAGs
 
@@ -52,9 +55,17 @@ Aucune clé d'API n'est nécessaire.
 | `contexte` | tous les jours à 5 h 30 | météo, jours fériés, vacances |
 | `agregats` | quand des validations ont été chargées | référentiels, puis tables d'agrégats |
 | `modele_prediction` | quand les agrégats ou le contexte changent | entraînement, évaluation, prédictions à 14 jours |
+| `perturbations_prim` | toutes les 10 minutes | relevé de l'info trafic PRIM, archivage des perturbations en cours |
 
 Les trois derniers enchaînements passent par des *assets* Airflow : un DAG déclare ce qu'il met à jour,
 les suivants s'abonnent. Les branches par année et par trimestre utilisent le *dynamic task mapping*.
+
+PRIM ne donne que l'état du réseau à l'instant de l'appel : `perturbations_prim` en garde la trace (réponse brute
+compressée gardée 3 jours dans `data/raw/perturbations/`, perturbations en cours dans Cassandra). 144 appels
+par jour sur un quota de 1 000, partagé avec l'appli de bureau ; quota épuisé, le relevé est sauté. L'archive
+ne commence qu'au premier relevé, et un incident de moins de 10 minutes survenu entre deux relevés peut
+être manqué. Une perturbation qui disparaît du flux avant sa fin annoncée est considérée terminée
+10 minutes après le dernier relevé qui la montrait (`fin_observee` dans l'API).
 
 ## Nettoyage
 
@@ -88,6 +99,8 @@ Une table par requête de l'application, comme le veut Cassandra (pas de jointur
 | `profil_horaire` | `(id_zdc)`, `cat_jour`, `heure` | répartition dans la journée |
 | `contexte_jour` | `(annee)`, `jour` | météo, férié, vacances |
 | `predictions`, `predictions_reseau` | `(id_zdc)`, `jour` | sorties du modèle |
+| `perturbations_jour` | `(jour)`, `ligne`, `id` | toutes les perturbations d'une journée |
+| `perturbations_ligne` | `(ligne)`, `jour` décroissant, `id` | historique des perturbations d'une ligne |
 | `modele_metriques`, `chargements` | | suivi du modèle et du pipeline |
 | `stations`, `lignes` | | dimensions |
 
@@ -118,7 +131,7 @@ calendrier, des jours fériés et des ponts, des vacances scolaires, de la mét�
 ```
 pipeline/
   docker-compose.yml
-  dags/                 les 5 DAGs
+  dags/                 les 6 DAGs
   lib/metrodata/        extract, transform, load, model, db (partagé entre Airflow et l'API)
   api/main.py           API de lecture
   data/                 raw (fichiers publiés), silver (parquet), models, figures ; non versionné
