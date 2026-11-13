@@ -46,9 +46,24 @@ Régénérer la topologie (≈ 1 Go décompressé) :
 
 ```bash
 curl -O https://eu.ftp.opendatasoft.com/stif/GTFS/IDFM-gtfs.zip
-unzip IDFM-gtfs.zip -d gtfs routes.txt stops.txt trips.txt stop_times.txt shapes.txt transfers.txt
+unzip IDFM-gtfs.zip -d gtfs routes.txt stops.txt trips.txt stop_times.txt shapes.txt transfers.txt calendar.txt calendar_dates.txt
 python3 scripts/build_metro_data.py gtfs
+python3 scripts/build_day_schedule.py gtfs   # horaires de la journée en accéléré, à relancer après la topologie
 ```
+
+## Journée en accéléré
+
+Bouton « Journée » (adresse `#/journee`, aussi dans un simple navigateur avec `npm run dev`) : la même carte,
+avec toutes les courses de métro et de RER d'une journée, de 4 h à 2 h du matin, jouées de 60 à 3 600 fois
+plus vite. La frise du bas montre le nombre de trains en circulation minute par minute ; on y déplace le
+curseur. Espace met en pause, les flèches avancent ou reculent de 5 minutes.
+
+Ce sont les **horaires prévus** du GTFS, pas les positions réelles : PRIM ne garde pas d'historique.
+`scripts/build_day_schedule.py` extrait trois jours types (semaine, samedi, dimanche) dans
+`src/data/journee.json` ; la date choisie détermine le jour type. Si la stack « données » tourne, les lignes
+perturbées à l'heure affichée viennent de l'archive du DAG `perturbations_prim` (voir `pipeline/README.md`).
+Les trains sont dessinés sur un canevas (`src/components/replay/TrainLayer.tsx`) : près de 800 points à
+l'heure de pointe, à 60 images par seconde.
 
 ## Comment la position des trains est calculée
 

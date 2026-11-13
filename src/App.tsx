@@ -14,7 +14,7 @@ import { Sheet } from "@/components/Sheet";
 import { TripPlanner, TripQuery } from "@/components/TripPlanner";
 import { Button } from "@/components/ui/button";
 import { completePath, extendPath, findRoutes, journeyFromPath, pathEnd } from "@/lib/route";
-import { ChartNoAxesColumn, Route } from "lucide-react";
+import { ChartNoAxesColumn, FastForward, Route } from "lucide-react";
 import { dataHref, hashParams, zdc } from "@/lib/frequentation";
 
 const VISIBLE_KEY = "metro-live:lignes-affichees";
@@ -283,6 +283,12 @@ export default function App() {
         >
           <ChartNoAxesColumn className="size-4" />
           <span className={mobile ? "sr-only" : ""}>Données</span>
+        </a>
+      </Button>
+      <Button asChild variant="outline" className="h-10 gap-2 rounded-full bg-white px-3 shadow-md">
+        <a href={`#/journee${focused ? `?ligne=${focused}` : ""}`} aria-label="Journée en accéléré">
+          <FastForward className="size-4" />
+          <span className={mobile ? "sr-only" : ""}>Journée</span>
         </a>
       </Button>
       <LineDrawer

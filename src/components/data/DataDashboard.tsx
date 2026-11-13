@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Map as MapIcon, X } from "lucide-react";
+import { FastForward, Map as MapIcon, X } from "lucide-react";
 import { Meta, StationRef, dateLongue, decale } from "@/lib/dataApi";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -204,6 +204,13 @@ function Shell({ carte, ligne, sousTitre, children }: { carte: boolean; ligne?: 
             <h1 className="condensed text-[28px] font-bold leading-none">Fréquentation du réseau</h1>
             <p className="mt-1.5 text-sm text-ink-soft">{sousTitre ?? "Métro, RER et trains d'Île-de-France, données ouvertes d'Île-de-France Mobilités"}</p>
           </div>
+          <div className="flex flex-wrap gap-2">
+            <Button asChild variant="outline" className="h-9 gap-2 rounded-full bg-white">
+              <a href={`#/journee${ligne && LINES.some((l) => l.id === ligne) ? `?ligne=${ligne}` : ""}`}>
+                <FastForward className="size-4" />
+                Journée en accéléré
+              </a>
+            </Button>
           {carte && (
             <Button asChild variant="outline" className="h-9 gap-2 rounded-full bg-white">
               <a href={carteHref(ligne && LINES.some((l) => l.id === ligne) ? ligne : null)}>
@@ -212,6 +219,7 @@ function Shell({ carte, ligne, sousTitre, children }: { carte: boolean; ligne?: 
               </a>
             </Button>
           )}
+          </div>
         </header>
         {children}
       </div>

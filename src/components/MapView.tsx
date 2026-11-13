@@ -42,7 +42,7 @@ const PLACES_POS = (() => {
 const MUTED = "#aeb7b3";
 
 // Île-de-France élargie : on ne peut pas se perdre loin du réseau
-const BOUNDS = L.latLngBounds([48.55, 1.85], [49.15, 2.85]);
+export const BOUNDS = L.latLngBounds([48.55, 1.85], [49.15, 2.85]);
 
 function useFit(line: Line | null, lines: Line[], bottomInset: number, only?: [number, number][]) {
   const map = useMap();
@@ -73,7 +73,7 @@ interface FitProps {
   fitKey?: string;
 }
 
-function FitTo({ line, lines, bottomInset, only, fitKey }: FitProps) {
+export function FitTo({ line, lines, bottomInset, only, fitKey }: FitProps) {
   const fit = useFit(line, lines, bottomInset, only);
   // recadrage seulement quand la ligne choisie change, pas à chaque case cochée
   const key = fitKey ?? (line ? line.id : "reseau");
@@ -85,7 +85,7 @@ function FitTo({ line, lines, bottomInset, only, fitKey }: FitProps) {
 }
 
 /** Boutons +, − et recentrer, posés en bas à droite au-dessus du tiroir mobile. */
-function ZoomControls({ line, lines, bottomInset, only }: FitProps) {
+export function ZoomControls({ line, lines, bottomInset, only }: FitProps) {
   const map = useMap();
   const fit = useFit(line, lines, bottomInset, only);
   const ref = useRef<HTMLDivElement>(null);
@@ -248,7 +248,7 @@ function useZoom() {
 }
 
 /** Légende des deux sens de la ligne choisie, avec le nombre de trains dans chaque sens. */
-function DirectionLegend({ line, counts, bottomInset }: { line: Line; counts: [number, number]; bottomInset: number }) {
+export function DirectionLegend({ line, counts, bottomInset }: { line: Line; counts: [number, number]; bottomInset: number }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (ref.current) {
